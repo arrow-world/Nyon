@@ -1,0 +1,9 @@
+counter64 : dis () ~> dis bnat64 := aut \(s,_):(bnat64,()). (s+1,s)
+
+clock : (freq:bnat64) -> dis ()
+
+pseq a : (freq:bnat64) -> (REPROG:dis (list a), RESET:dis ()) ~> dis a :=
+    let
+        PROG := holder REPROG
+    in
+        sampler 

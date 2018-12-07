@@ -1,0 +1,21 @@
+product : {n} -> vec type n -> type
+
+data transit s:type m n σ:(vec type m) τ:(vec type n) = (s,product σ) -> (s,product τ)
+serial : {s0, s1, i0, o0, i1, o1} -> {s σA:(vec type iA) τA:(vec type oA)} -> {t }
+
+machine s:type σ:(vec type 1) τ:(vec type n) : (transit s σ τ) -> s -> (dis σ) ->> (dis τ)
+holder a:type : (ι : a) -> (dis a) ->> (con a)
+sampler a:type : (con a, dis ()) ->> (dis a)
+
+map_dis σ:type τ:type := \f : σ -> τ. state_machine ( \(_,x):((),σ). ((), f x) ) ()
+
+map_signal a:type := \c:a. map_dis {a:=(), b:=a} (\x:(). c)
+
+memory a:type := \ι:a. pipeline (ON_WRITE : dis a, ON_LOAD : dis ()). sampler (holder ι ON_WRITE, ON_LOAD)
+memory_ck a:type := \ι:a. pipeline (D : con a, CK : dis ()). holder ι $ sampler (D, CK)
+
+counter := state_machine ( \(n,_):(nat,()). (n+1, n) ) 0
+
+// a programmable sequencer.
+pseq a:type := pipeline (REPROG_SEQ : dis (partial_map nat a), CK : dis (), RESET : dis ()). let
+    c := counter 
