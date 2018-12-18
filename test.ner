@@ -1,0 +1,1 @@
+liftc : (a:type, b:type) -> (a -> b) -> sigfun (sigtype::C a) (sigtype::C b)

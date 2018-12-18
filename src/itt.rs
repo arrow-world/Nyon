@@ -135,13 +135,18 @@ pub fn normalize(ctx: &Context, t: &Rc<RefCell<Term>>) -> NormalizeResult {
                 Ok((A_norm, B_norm)) => Ok(NormalizeOk { rewrited: A_norm.rewrited || B_norm.rewrited }),
                 Err(e) => Err(NormalizeErr::AtPi(e)),
             },
+        Term::Lambda(ref A, ref M) =>
+            match normalize_abs(ctx, A, M) {
+                Ok((A_norm, M_norm)) => Ok(NormalizeOk { rewrited: A_norm.rewrited || M_norm.rewrited }),
+                Err(e) => Err(NormalizeErr::AtLambda(e)),
+            },
         Term::App(ref M, ref N) =>
             {
                 let M_norm = normalize(ctx, M)?;
                 let N_norm = normalize(ctx, N)?;
-                if M_norm.rewrited {
-                    beta_contract(M, &N.borrow());
-                    normalize(ctx, M)?;
+                if let Term::Lambda(ref _A, ref M) = *M.borrow() {
+                    beta_contract(&M, &N.borrow());
+                    normalize(ctx, &M)?;
                     *t.borrow_mut() = M.borrow().clone();
                     Ok(NormalizeOk { rewrited: true })
                 }
@@ -157,6 +162,7 @@ pub struct NormalizeOk {
 }
 pub enum NormalizeErr {
     AtPi(NormalizeAbsErr),
+    AtLambda(NormalizeAbsErr),
 }
 
 pub fn normalize_abs(ctx: &Context, A: &Rc<RefCell<Term>>, M: &Rc<RefCell<Term>>) -> NormalizeAbsResult {

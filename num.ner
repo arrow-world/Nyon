@@ -1,0 +1,99 @@
+data Nat : type where
+    Z : nat
+    S : nat -> nat
+
+data empty : type where
+
+data infix = : {'a : type} -> 'a -> 'a -> prop where
+    Refl : (x:'a) -> (x:'a) -> x = x
+
+data unit : type where
+    TT : unit
+
+infix_prio op_add op_mul
+
+infix(op_add) + : nat*nat -> nat
+let rec m + n =
+    case n of
+        nat::Z => m
+        nat::S l => nat::S (m + l)
+
+infix(op_mul) * : nat*nat -> nat
+let rec m * n =
+    case n of
+        nat::Z => nat::Z
+        nat::S l => m * n + l
+
+to_int : nat -> int
+let rec to_int n =
+    case n of
+        nat::Z => 0
+        nat::S m => (to_int m) + 1
+
+data list : type -> type where
+    Nil : {forall a:type} -> list a
+    Cons : {forall a:type} -> list a -> a -> list a
+
+list::map : {forall 'a 'b} -> (a -> b) -> list a -> list b
+let rec list::map f xs =
+    case xs of
+        list::Nil => list::Nil
+        list::Cons ys x => list::Cons (map f ys) (f x)
+
+list::cat : {forall 'a} -> list a -> list a -> list a
+let rec list::cat xs ys =
+    case ys of
+        list::Nil => xs
+        list::Cons ys' y => list::Cons (list::cat xs ys') y
+
+data prod : list type -> type where
+    TT : prod list::Nil
+    Cons : {forall ts:(list type) a:type } -> ts -> a -> prod (Cons ts a)
+
+data vec : type -> nat -> type where
+    Nil : {forall a:type} -> vec a nat::Z
+    Cons : {forall a:type n:nat} -> vec a n -> a -> vec a (nat::S n)
+
+data bool : type where
+    True : bool
+    False : bool
+
+true := bool::True
+false := bool::False
+
+domain signal
+
+data sigtype : type where
+    C : type -> sigtype
+    E : type -> sigtype
+
+sig : sigtype -> type
+
+sigvec : (sts : list sigtype) -> prod $ map (\st:sigtype -> sig st) sts
+
+sigfun : list sigtype -> list sigtype -> type
+let sigfun i o = sigvec i -> sigvec o
+
+let sigtype::Δ = sigtype::E unit
+
+const : {'a} -> a -> sig (sigtype::C a)
+
+liftc : {'a,'b} -> (a -> b) -> sigfun [sigtype::C a] [sigtype::C b]
+hold : {'a} -> a -> sigfun [sigtype::E a] [sigtype::C a]
+sample : {'a} -> sigfun [sigtype::C a, sigtype::Δ] [sigtype::E a]
+automata : {'a,'b,'state} -> (s*a -> s*b) -> a -> sigfun [sigtype::E a] [sigtype::E b]
+
+
+axiom const0 : 'a -> (c: a) -> (x: sig sigtype::Δ) -> (sample [const c,x] = lifte (\_->c) [x])
+
+axiom liftc0 : ('a,'b) -> (f:a->b) -> (s:sig $ sigtype::C a) -> liftc f [a]
+axiom cs_eq : {'a} -> (s0,s1 : sig (sigtype::C) a) -> (x: sig sigtype::Δ) -> (sample [s0,x] = sample [s1,x])
+    -> (s0 = s1)
+
+lifte : {'a 'b} -> (a -> b) -> sigfun [sigtype::E a] [sigtype::E b]
+let lifte {a} f = automata ( \x:unit*a -> let (s,x') = x in [unit::tt, f x'] ) unit::tt
+
+counter : sigfun [sigtype::Δ] -> [sigtype::E nat]
+let counter = automata ( \x:nat*unit -> let (s,_) = x in [nat::S s, s] ) nat::Z
+
+programmable_sequencer : sigfun [sigtype::E (nat -> ), sigtype::Δ] -> 
