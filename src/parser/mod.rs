@@ -9,10 +9,6 @@ use combine::stream::{state::{SourcePosition, State}, easy};
 use self::ast::*;
 use self::term::*;
 
-pub fn parse_term(t: &str) -> Result<Term, easy::Errors<char, &str, SourcePosition>> {
-    token_sep().with(term()).skip(token_sep()).skip(eof()).easy_parse(State::new(t)).map(|x| x.0)
-}
-
 /*
 <pre_ident> ::= (<alnum>|_)* <alpha> (<alnum>|_)*
 <ident> ::= <pre_ident>(::<pre_ident>)*
