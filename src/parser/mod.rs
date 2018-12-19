@@ -1,5 +1,6 @@
 mod ast;
 mod term;
+mod lexer;
 
 use combine::*;
 use combine::parser::char::*;
@@ -124,6 +125,38 @@ fn token_sep1<I>() -> impl Parser<Input = I, Output = ()>
     | <typing> | let <term> = <term> in <term> | \<ident>:<term> -> <term> | case <term> of <arm_list>
     | (<term>) | <term> $ <term> | _ | <literal>
 
+<term_alpha(byident:<ident>)> ::=
+    type |
+    <dbi> |
+    \( <ident>:<term> \) -> <term> |
+    let (<term> = <term(byident: "in")> <lf>)+ in <term> |
+    \\ <ident>:<term> -> <term> |
+    case <term(byident: "of")> of (<term(byop: "=>")> => <term> <lf>)* |
+    _ |
+    <nat> |
+    <int> |
+    <str> |
+    !byident <ident> |
+    \( <term> \) |
+    $ <term> &( <lf> | \) ) |
+
+<arrow_tail(byop, byident)> ::= -> <term(byop: byop | op_arrow, byident)> <arrow_tail>
+<typing_tail(byop, byident)> ::= : <term(byop: byop | op_typing, byident) <typing_tail>
+<tuple_tail(byop, byident)> ::= , <term(byop: byop | op_tuple, byident)> <tuple_tail>
+
+<term_tail(byop, byident)> ::=
+    !byop (
+        <arrow_tail(byop, byident)> |
+        <typing_tail(byop, byident)> |
+        <tuple_tail(byop, byident)>
+    )
+
+<infix(byop, byident)> ::=
+    seqby1( <term_alpha(byop, byident)> <term_tail(byop, byident)> , !byop <op> )
+
+<term(byop = !ε, byident = !ε)> ::=
+    chainl1( <infix(byop, byident)>, ε )
+
 <term> ::=
     type <term_tail> |
     <ident> <term_tail> |
@@ -143,8 +176,6 @@ fn token_sep1<I>() -> impl Parser<Input = I, Output = ()>
     <ts> : <ts> <term_with_app> <term_tail> |
     <ts> , (<ts> <term_with_app> <ts> ,)* opt(<ts> <term_with_app>) <term_tail> |
 <term_with_app> ::= chainl1(<term>, <sp>)
-
-A -> B -> C , D : E -> F , G
 
 <term'> ::=
     type <term'_tail> |
