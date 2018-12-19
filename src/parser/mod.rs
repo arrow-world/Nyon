@@ -127,7 +127,6 @@ fn token_sep1<I>() -> impl Parser<Input = I, Output = ()>
 
 <term_alpha(byident:<ident>)> ::=
     type |
-    <dbi> |
     \( <ident>:<term> \) -> <term> |
     let (<term> = <term(byident: "in")> <lf>)+ in <term> |
     \\ <ident>:<term> -> <term> |
