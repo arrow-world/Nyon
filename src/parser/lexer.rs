@@ -1,21 +1,23 @@
 use combine::*;
 use combine::parser::char::*;
-use combine::stream::{state::{SourcePosition, State}, easy};
 
+#[derive(Clone, PartialEq, Eq, Debug)]
 pub enum Token {
-    Ident{s: String},
-    Keyword{kw: Keyword},
-    Sep{sep: Sep},
-    Op{op: Op},
-    Lit{lit: Lit},
+    Ident(String),
+    Keyword(Keyword),
+    Sep(Sep),
+    Op(Op),
+    Lit(Lit),
 }
 
+#[derive(Clone, PartialEq, Eq, Debug)]
 pub enum Keyword {
     Case,
     Let,
     Type,
 }
 
+#[derive(Clone, PartialEq, Eq, Debug)]
 pub enum Sep {
     OpenParen,
     CloseParen,
@@ -23,6 +25,7 @@ pub enum Sep {
     LF,
 }
 
+#[derive(Clone, PartialEq, Eq, Debug)]
 pub enum Op {
     Arrow,
     Typing,
@@ -30,16 +33,17 @@ pub enum Op {
     Domain,
     Hole,
     Lambda,
-    UserDef{s: String},
+    UserDef(String),
 }
 
+#[derive(Clone, PartialEq, Eq, Debug)]
 pub enum Lit {
     Nat{n: ::num::BigInt},
     Int{i: ::num::BigInt},
     Str{s: String},
 }
 
-fn top_level<I>() -> impl Parser<Input = I, Output = Vec<Token>>
+pub fn top_level<I>() -> impl Parser<Input = I, Output = Vec<Token>>
     where I: Stream<Item = char>,
           I::Error: ParseError<I::Item, I::Range, I::Position>,
 {
@@ -65,23 +69,24 @@ fn lex<I>() -> impl Parser<Input = I, Output = Token>
     ));
 
     use unicode_categories::UnicodeCategories;
-    let op = || choice((
+    let op_char = || satisfy(|c:char| c.is_punctuation_other() || c.is_symbol_math());
+
+    let op = || attempt( choice((
         string("->").map(|_| Op::Arrow),
+        string("::").map(|_| Op::Domain),
         token(':').map(|_| Op::Typing),
         token(',').map(|_| Op::Tuple),
-        string("::").map(|_| Op::Domain),
         token('_').map(|_| Op::Hole),
         token('\\').map(|_| Op::Lambda),
-        many1::<String,_>(satisfy(|c:char| c.is_punctuation_other() || c.is_symbol_math()))
-            .map(|s| Op::UserDef{s}),
-    ));
+    )).skip(not_followed_by(op_char())) )
+        .or(many1::<String,_>(op_char()).map(|s| Op::UserDef(s)));
 
     choice((
-        attempt( ident().map(|s| Token::Ident{s}) ),
-        attempt( kw().map(|kw| Token::Keyword{kw}) ),
-        attempt( sep().map(|sep| Token::Sep{sep}) ),
-        attempt( op().map(|op| Token::Op{op}) ),
-        attempt( lit().map(|lit| Token::Lit{lit}) ),
+        attempt( ident().map(|s| Token::Ident(s)) ),
+        attempt( kw().map(|kw| Token::Keyword(kw)) ),
+        attempt( sep().map(|sep| Token::Sep(sep)) ),
+        attempt( op().map(|op| Token::Op(op)) ),
+        attempt( lit().map(|lit| Token::Lit(lit)) ),
     ))
 }
 
