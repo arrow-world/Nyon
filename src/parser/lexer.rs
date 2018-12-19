@@ -39,6 +39,14 @@ pub enum Lit {
     Str{s: String},
 }
 
+fn top_level<I>() -> impl Parser<Input = I, Output = Vec<Token>>
+    where I: Stream<Item = char>,
+          I::Error: ParseError<I::Item, I::Range, I::Position>,
+{
+    let spaces = || many::<(),_>(not_followed_by(newline()).skip(space()));
+    spaces().with(many(lex().skip(spaces())))
+}
+
 fn lex<I>() -> impl Parser<Input = I, Output = Token>
     where I: Stream<Item = char>,
           I::Error: ParseError<I::Item, I::Range, I::Position>,
