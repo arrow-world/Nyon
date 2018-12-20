@@ -1,36 +1,43 @@
+use combine::stream::PointerOffset;
 use combine::stream::state::SourcePosition;
 use std::fmt;
 
 #[derive(Clone, Debug)]
-pub enum TermWithoutPos {
+pub enum Term {
     Var(Ident),
     Universe,
-    DBI(::num::BigInt),
-    App{f: Term, x: Term},
-    Pi{x: Ident, A: Term, B: Term},
-    Arrow{A: Term, B: Term},
+    App{f: TermWithPos, x: TermWithPos},
+    Pi{x: Ident, A: TermWithPos, B: TermWithPos},
+    Arrow{A: TermWithPos, B: TermWithPos},
     Infix(Infix),
     Typing(Typing),
-    Let{patn:Term, t: Term, u: Term},
-    Abs{x: Ident, A: Term, t: Term},
-    Case{t: Term, arms: Vec<Arm>},
+    Let{decs: Vec<(TermWithPos, TermWithPos)>, body: TermWithPos},
+    Abs{x: Ident, A: TermWithPos, t: TermWithPos},
+    Case{t: TermWithPos, arms: Vec<Arm>},
     Literal(Literal),
     Hole,
 }
-impl fmt::Display for TermWithoutPos {
+impl fmt::Display for Term {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            TermWithoutPos::Var(i) => write!(f, "{}", i),
-            TermWithoutPos::Universe => write!(f, "type"),
-            TermWithoutPos::DBI(n) => write!(f, "@{}", n),
-            TermWithoutPos::App{f:_f,x} => write!(f, "({} {})", _f, x),
-            TermWithoutPos::Pi{x,A,B} => write!(f, "Π({}:{}){}", x, A, B),
-            TermWithoutPos::Arrow{A,B} => write!(f, "({} -> {})", A, B),
-            TermWithoutPos::Infix(i) => write!(f, "({})", i),
-            TermWithoutPos::Typing(ty) => write!(f, "({})", ty),
-            TermWithoutPos::Let{patn, t, u} => write!(f, "(let {} = {} in {})", patn, t, u),
-            TermWithoutPos::Abs{x,A,t} => write!(f, "(λ{}:{}.{})", x, A, t),
-            TermWithoutPos::Case{t, arms} => {
+            Term::Var(i) => write!(f, "{}", i),
+            Term::Universe => write!(f, "type"),
+            Term::App{f:_f,x} => write!(f, "({} {})", _f, x),
+            Term::Pi{x,A,B} => write!(f, "Π({}:{}){}", x, A, B),
+            Term::Arrow{A,B} => write!(f, "({} -> {})", A, B),
+            Term::Infix(i) => write!(f, "({})", i),
+            Term::Typing(ty) => write!(f, "({})", ty),
+            Term::Let{decs, body} => {
+                write!(f, "(let ")?;
+                for i in 0..decs.len() {
+                    let (lhs, rhs) = decs[i];
+                    write!(f, "{} = {}", lhs, rhs)?;
+                    if i < decs.len()-1 { write!(f, "; ")?; }
+                }
+                write!(f, " in {})", body)
+            },
+            Term::Abs{x,A,t} => write!(f, "(λ{}:{}.{})", x, A, t),
+            Term::Case{t, arms} => {
                 write!(f, "(case {} of ", t)?;
                 for i in 0..arms.len() {
                     write!(f, "{}", arms[i])?;
@@ -38,19 +45,19 @@ impl fmt::Display for TermWithoutPos {
                 }
                 write!(f, ")")
             },
-            TermWithoutPos::Literal(lit) => write!(f, "{}", lit),
-            TermWithoutPos::Hole => write!(f, "_"),
+            Term::Literal(lit) => write!(f, "{}", lit),
+            Term::Hole => write!(f, "_"),
         }
     }
 }
 
 #[derive(Clone, Debug)]
-pub struct Term {
-    pub term: Box<TermWithoutPos>,
+pub struct TermWithPos {
+    pub term: Box<Term>,
     pub start: SourcePosition,
     pub end: SourcePosition,
 }
-impl fmt::Display for Term {
+impl fmt::Display for TermWithPos {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "{:}", self.term)
     }
@@ -78,8 +85,8 @@ pub struct Op(pub String);
 
 #[derive(Clone, Debug)]
 pub struct Infix {
-    pub head: Term,
-    pub tail: Vec<(Op, Term)>,
+    pub head: TermWithPos,
+    pub tail: Vec<(Op, TermWithPos)>,
 }
 impl fmt::Display for Infix {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
@@ -93,8 +100,8 @@ impl fmt::Display for Infix {
 
 #[derive(Clone, Debug)]
 pub struct Arm {
-    pub patn: Term,
-    pub t: Term,
+    pub patn: TermWithPos,
+    pub t: TermWithPos,
 }
 impl fmt::Display for Arm {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
@@ -104,8 +111,8 @@ impl fmt::Display for Arm {
 
 #[derive(Clone, Debug)]
 pub struct Typing {
-    pub x: Term,
-    pub T: Term,
+    pub x: TermWithPos,
+    pub T: TermWithPos,
 }
 impl fmt::Display for Typing {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
@@ -118,7 +125,7 @@ pub enum Literal {
     Nat(::num::BigInt),
     Int(::num::BigInt),
     Str(String),
-    Tuple{head: Term, tail: Vec<Term>},
+    Tuple{head: TermWithPos, tail: Vec<TermWithPos>},
 }
 impl fmt::Display for Literal {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
@@ -139,9 +146,9 @@ impl fmt::Display for Literal {
 }
 
 pub enum Statement {
-    Data{ident: IdentDef, T: Term, ctors: Vec<Ctor>},
+    Data{ident: IdentDef, T: TermWithPos, ctors: Vec<Ctor>},
     Typing(Typing),
-    Let{patn: Term, t: Term},
+    Let{patn: TermWithPos, t: TermWithPos},
     InfixPrio{infixs: Vec<Ident>}
 }
 
@@ -152,5 +159,5 @@ pub enum IdentDef {
 
 pub struct Ctor {
     ident: IdentDef,
-    T: Term,
+    T: TermWithPos,
 }

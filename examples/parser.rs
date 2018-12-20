@@ -8,8 +8,8 @@ fn main(){
     File::open("test.ner").unwrap().read_to_string(&mut source).unwrap();
     let source = source;
 
-    match parser::parse_term(&source) {
+    /* match parser::parse_term(&source) {
         Ok(ast) => println!("{}", ast),
         Err(e) => println!("{}", e),
-    }
+    } */
 }

@@ -20,9 +20,9 @@ use self::term::*;
 
 <term_alpha(byident:<ident>)> ::=
     type |
-    \( <ident>:<term> \) -> <term> |
-    let (<term> = <term(byident: "in")> <lf>)+ in <term> |
-    \\ <ident>:<term> -> <term> |
+    \( <ident>:<term(_,byident)> \) -> <term> |
+    let sep_by1( <term("=",byident|"in")> = <term(<lf>,byident|"in")> , <lf> ) in <term(_,byident)> |
+    \\ <ident>:<term("->",byident)> -> <term(_,byident)> |
     case <term(byident: "of")> of (<term(byop: "=>")> => <term> <lf>)* |
     _ |
     <nat> |
