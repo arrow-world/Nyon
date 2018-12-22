@@ -3,7 +3,7 @@
 mod current;
 mod signal;
 mod dns;
-pub mod parser;
+pub mod syntax;
 
 // extern crate llvm_sys;
 // extern crate rustc_llvm_proxy;

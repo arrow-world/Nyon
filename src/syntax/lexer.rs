@@ -40,6 +40,9 @@ pub enum Keyword {
     If,
     Then,
     Else,
+    Data,
+    Infix,
+    InfixPrio,
 }
 
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
@@ -92,14 +95,17 @@ fn lex<I>() -> impl Parser<Input = I, Output = TokenWithPos>
     let op_char = || satisfy(|c:char| c.is_punctuation_other() || c.is_symbol_math());
 
     let kw = || choice((
-        string("type").map(|_| Keyword::Type),
-        string("let").map(|_| Keyword::Let),
-        string("in").map(|_| Keyword::In),
-        string("case").map(|_| Keyword::Case),
-        string("of").map(|_| Keyword::Of),
-        string("if").map(|_| Keyword::If),
-        string("then").map(|_| Keyword::Then),
-        string("else").map(|_| Keyword::Else),
+        attempt( string("data").map(|_| Keyword::Data) ),
+        attempt( string("infix").map(|_| Keyword::Infix) ),
+        attempt( string("infix_prio").map(|_| Keyword::InfixPrio) ),
+        attempt( string("type").map(|_| Keyword::Type) ),
+        attempt( string("let").map(|_| Keyword::Let) ),
+        attempt( string("in").map(|_| Keyword::In) ),
+        attempt( string("case").map(|_| Keyword::Case) ),
+        attempt( string("of").map(|_| Keyword::Of) ),
+        attempt( string("if").map(|_| Keyword::If) ),
+        attempt( string("then").map(|_| Keyword::Then) ),
+        attempt( string("else").map(|_| Keyword::Else) ),
     )).skip(not_followed_by(alpha_num()));
 
     let sep = || choice((
@@ -111,9 +117,9 @@ fn lex<I>() -> impl Parser<Input = I, Output = TokenWithPos>
     )).skip(not_followed_by(op_char()));
 
     let op = || attempt( choice((
-        string("->").map(|_| Op::Arrow),
-        string("::").map(|_| Op::Domain),
-        string("=>").map(|_| Op::Matcher),
+        attempt( string("->").map(|_| Op::Arrow) ),
+        attempt( string("::").map(|_| Op::Domain) ),
+        attempt( string("=>").map(|_| Op::Matcher) ),
         token(':').map(|_| Op::Typing),
         token(',').map(|_| Op::Tuple),
         token('_').map(|_| Op::Hole),

@@ -14,6 +14,7 @@ pub enum Term {
     Let{decs: Vec<(TermWithPos, TermWithPos)>, body: TermWithPos},
     Abs{x: Ident, A: TermWithPos, t: TermWithPos},
     Case{t: TermWithPos, arms: Vec<Arm>},
+    If{p: TermWithPos, tv: TermWithPos, fv: TermWithPos},
     Literal(Literal),
     Hole,
 }
@@ -45,6 +46,7 @@ impl fmt::Display for Term {
                 }
                 write!(f, ")")
             },
+            Term::If{p, tv, fv} => write!(f, "(if {} then {} else {})", p, tv, fv),
             Term::Literal(lit) => write!(f, "{}", lit),
             Term::Hole => write!(f, "_"),
         }

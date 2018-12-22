@@ -1,13 +1,14 @@
 mod ast;
-mod term;
+mod parser;
 mod lexer;
 
 use combine::*;
 use combine::parser::char::*;
 use combine::stream::{state::{SourcePosition, State}, easy};
 
-use self::ast::*;
-use self::term::*;
+pub fn lex(top_level: &str) -> Result<Vec<lexer::TokenWithPos>, easy::Errors<char, &str, SourcePosition>> {
+    lexer::top_level().skip(eof()).easy_parse(State::new(top_level)).map(|x| x.0)
+}
 
 /*
 <term> ::= <ident> | type | <lit> | _ | \( <expr> \) | $ <expr> &( \) | <lex_lf> )
@@ -17,7 +18,7 @@ use self::term::*;
 
 <expr_case> ::= case <expr> of sep_by(<expr> => <expr>, <lex_lf>)
 
-<expr_if> ::= if <expr> then <expr> opt(else <expr>)
+<expr_if> ::= if <expr> then <expr> else <expr>
 
 <expr_tuple> ::= sep_by2(<expr>, \,)
 
@@ -41,7 +42,7 @@ use self::term::*;
 
 <ident> ::= sep_by(<lex_ident>, ::) <lex_ident>
 <lex_ident> ::= &!(<lex_keyword> &!(<alpha>|<digit>|_)) (<digit>|_)* <alpha> (<alpha>|<digit>|_)*
-<lex_keyword> ::= type | let | in | case | of | if | then | else
+<lex_keyword> ::= type | let | in | case | of | if | then | else | data | infix | infix_prio
 
 <lit> ::= <lex_nat> | <lex_int> | <lex_str>
 <lex_nat> ::= <digit>*
@@ -50,8 +51,8 @@ use self::term::*;
 
 <lex_lf> ::= \n | ;
 
-<top_level> ::= sep_by(<statement>, <lex_lf>)
-<statement> ::= <def_datatype> | <decl_infix> | 
+<top_level> ::= sep_by(<statement>, many1(<lex_lf>))
+<statement> ::= <def_datatype> | <decl_infix> | <infix_prio>
 
 <def_datatype> ::= data <ident> : <expr_typed> where <ctor_list>
 <ctor_list> ::= sep_by(<ident> : <expr_typed>, <lex_lf>)

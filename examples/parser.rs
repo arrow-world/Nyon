@@ -1,5 +1,5 @@
 extern crate lassy;
-use lassy::parser;
+use lassy::syntax;
 use std::fs::File;
 use std::io::prelude::*;
 
@@ -8,8 +8,12 @@ fn main(){
     File::open("test.ner").unwrap().read_to_string(&mut source).unwrap();
     let source = source;
 
-    /* match parser::parse_term(&source) {
-        Ok(ast) => println!("{}", ast),
+    match syntax::lex(&source) {
+        Ok(lexed) => {
+            for token in lexed {
+                println!("{:?}", token);
+            }
+        },
         Err(e) => println!("{}", e),
-    } */
+    }
 }
