@@ -32,9 +32,14 @@ impl From<Token> for TokenWithPos {
 
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
 pub enum Keyword {
-    Case,
-    Let,
     Type,
+    Let,
+    In,
+    Case,
+    Of,
+    If,
+    Then,
+    Else,
 }
 
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
@@ -42,18 +47,25 @@ pub enum Sep {
     OpenParen,
     CloseParen,
     Dollar,
-    LF,
+    Line(LineSep),
+}
+
+#[derive(Clone, PartialEq, Eq, Hash, Debug)]
+pub enum LineSep {
+    NewLine,
+    Semicolon,
 }
 
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
 pub enum Op {
     Arrow,
+    Lambda,
     Typing,
     Tuple,
     Domain,
     Hole,
-    Lambda,
     Equal,
+    Matcher,
     UserDef(String),
 }
 
@@ -80,21 +92,28 @@ fn lex<I>() -> impl Parser<Input = I, Output = TokenWithPos>
     let op_char = || satisfy(|c:char| c.is_punctuation_other() || c.is_symbol_math());
 
     let kw = || choice((
-        string("case").map(|_| Keyword::Case),
-        string("let").map(|_| Keyword::Let),
         string("type").map(|_| Keyword::Type),
+        string("let").map(|_| Keyword::Let),
+        string("in").map(|_| Keyword::In),
+        string("case").map(|_| Keyword::Case),
+        string("of").map(|_| Keyword::Of),
+        string("if").map(|_| Keyword::If),
+        string("then").map(|_| Keyword::Then),
+        string("else").map(|_| Keyword::Else),
     )).skip(not_followed_by(alpha_num()));
 
     let sep = || choice((
         token('(').map(|_| Sep::OpenParen),
         token(')').map(|_| Sep::CloseParen),
         token('$').map(|_| Sep::Dollar),
-        newline().or(token(';')).map(|_| Sep::LF),
+        newline().map(|_| Sep::Line(LineSep::NewLine)),
+        token(';').map(|_| Sep::Line(LineSep::Semicolon)),
     )).skip(not_followed_by(op_char()));
 
     let op = || attempt( choice((
         string("->").map(|_| Op::Arrow),
         string("::").map(|_| Op::Domain),
+        string("=>").map(|_| Op::Matcher),
         token(':').map(|_| Op::Typing),
         token(',').map(|_| Op::Tuple),
         token('_').map(|_| Op::Hole),
@@ -104,8 +123,8 @@ fn lex<I>() -> impl Parser<Input = I, Output = TokenWithPos>
         .or(many1::<String,_>(op_char()).map(|s| Op::UserDef(s)));
 
     let token = || choice((
-        attempt( ident().map(|s| Token::Ident(s)) ),
         attempt( kw().map(|kw| Token::Keyword(kw)) ),
+        attempt( ident().map(|s| Token::Ident(s)) ),
         attempt( sep().map(|sep| Token::Sep(sep)) ),
         attempt( op().map(|op| Token::Op(op)) ),
         attempt( lit().map(|lit| Token::Lit(lit)) ),
@@ -149,8 +168,8 @@ fn int<I>() -> impl Parser<Input = I, Output = ::num::BigInt>
     where I: Stream<Item = char>,
           I::Error: ParseError<I::Item, I::Range, I::Position>,
 {
-    let sign = optional(token('+').or(token('-')));
-    sign.and(nat()).map(|(s, n): (Option<char>, ::num::BigInt)| if s == Some('-') {-n} else {n})
+    let sign = token('+').or(token('-'));
+    sign.and(nat()).map(|(s, n): (char, ::num::BigInt)| if s == '-' {-n} else {n})
 }
 
 fn str<I>() -> impl Parser<Input = I, Output = String>

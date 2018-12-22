@@ -30,7 +30,7 @@ impl fmt::Display for Term {
             Term::Let{decs, body} => {
                 write!(f, "(let ")?;
                 for i in 0..decs.len() {
-                    let (lhs, rhs) = decs[i];
+                    let (ref lhs, ref rhs) = decs[i];
                     write!(f, "{} = {}", lhs, rhs)?;
                     if i < decs.len()-1 { write!(f, "; ")?; }
                 }

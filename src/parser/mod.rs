@@ -10,7 +10,7 @@ use self::ast::*;
 use self::term::*;
 
 /*
-<term> ::= <ident> | <lit> | _ | \( <expr> \) | $ <expr> &( \) | <lex_lf> )
+<term> ::= <ident> | type | <lit> | _ | \( <expr> \) | $ <expr> &( \) | <lex_lf> )
 
 <expr_let> ::= let sep_by1(<patn_match>, <lex_lf>) in <expr>
 <patn_match> ::= <expr> = <expr>
@@ -27,7 +27,7 @@ use self::term::*;
 <expr_typed> ::= <expr_abs> | <expr_arrow> | <expr_udi> | <expr_app> | <term>
 
 <expr_udi> ::= sep_by2(<expr_app> | <term>, <lex_op>)
-<lex_op> ::= &!(( -> | \\ | : | \, | \( | \) | = | => | $ | # | \(\* | \*\) ) &!<char_op>) <char_op>+
+<lex_op> ::= &!(( -> | \\ | : | \, | :: | _ | \( | \) | = | => | $ | # | \(\* | \*\) ) &!<char_op>) <char_op>+
 
 <expr_app> ::= many2(<term>)
 
@@ -43,11 +43,10 @@ use self::term::*;
 <lex_ident> ::= &!(<lex_keyword> &!(<alpha>|<digit>|_)) (<digit>|_)* <alpha> (<alpha>|<digit>|_)*
 <lex_keyword> ::= type | let | in | case | of | if | then | else
 
-<lit> ::= <lex_nat> | <lex_int> | <lex_str> | <lex_universe>
+<lit> ::= <lex_nat> | <lex_int> | <lex_str>
 <lex_nat> ::= <digit>*
 <lex_int> ::= (+|-) <digit>*
 <lex_str> ::= " ( &!" <any> )* "
-<lex_universe> ::= type
 
 <lex_lf> ::= \n | ;
 
