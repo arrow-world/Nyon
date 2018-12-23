@@ -4,40 +4,40 @@ use std::fmt;
 
 #[derive(Clone, Debug)]
 pub enum Term {
-    Var(Ident),
+    Ident(Ident),
     Universe,
     App{f: TermWithPos, x: TermWithPos},
     Pi{x: Ident, A: TermWithPos, B: TermWithPos},
     Arrow{A: TermWithPos, B: TermWithPos},
     Infix(Infix),
     Typing(Typing),
-    Let{decs: Vec<(TermWithPos, TermWithPos)>, body: TermWithPos},
-    Abs{x: Ident, A: TermWithPos, t: TermWithPos},
+    Let{defs: Vec<(TermWithPos, TermWithPos)>, body: TermWithPos},
+    Lam{x: Ident, A: TermWithPos, t: TermWithPos},
     Case{t: TermWithPos, arms: Vec<Arm>},
     If{p: TermWithPos, tv: TermWithPos, fv: TermWithPos},
-    Literal(Literal),
+    Lit(Lit),
     Hole,
 }
 impl fmt::Display for Term {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            Term::Var(i) => write!(f, "{}", i),
+            Term::Ident(i) => write!(f, "{}", i),
             Term::Universe => write!(f, "type"),
             Term::App{f:_f,x} => write!(f, "({} {})", _f, x),
             Term::Pi{x,A,B} => write!(f, "Π({}:{}){}", x, A, B),
             Term::Arrow{A,B} => write!(f, "({} -> {})", A, B),
             Term::Infix(i) => write!(f, "({})", i),
             Term::Typing(ty) => write!(f, "({})", ty),
-            Term::Let{decs, body} => {
+            Term::Let{defs, body} => {
                 write!(f, "(let ")?;
-                for i in 0..decs.len() {
-                    let (ref lhs, ref rhs) = decs[i];
+                for i in 0..defs.len() {
+                    let (ref lhs, ref rhs) = defs[i];
                     write!(f, "{} = {}", lhs, rhs)?;
-                    if i < decs.len()-1 { write!(f, "; ")?; }
+                    if i < defs.len()-1 { write!(f, "; ")?; }
                 }
                 write!(f, " in {})", body)
             },
-            Term::Abs{x,A,t} => write!(f, "(λ{}:{}.{})", x, A, t),
+            Term::Lam{x,A,t} => write!(f, "(λ{}:{}.{})", x, A, t),
             Term::Case{t, arms} => {
                 write!(f, "(case {} of ", t)?;
                 for i in 0..arms.len() {
@@ -47,7 +47,7 @@ impl fmt::Display for Term {
                 write!(f, ")")
             },
             Term::If{p, tv, fv} => write!(f, "(if {} then {} else {})", p, tv, fv),
-            Term::Literal(lit) => write!(f, "{}", lit),
+            Term::Lit(lit) => write!(f, "{}", lit),
             Term::Hole => write!(f, "_"),
         }
     }
@@ -56,8 +56,8 @@ impl fmt::Display for Term {
 #[derive(Clone, Debug)]
 pub struct TermWithPos {
     pub term: Box<Term>,
-    pub start: SourcePosition,
-    pub end: SourcePosition,
+    pub start: usize,
+    pub end: usize,
 }
 impl fmt::Display for TermWithPos {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
@@ -123,19 +123,19 @@ impl fmt::Display for Typing {
 }
 
 #[derive(Clone, Debug)]
-pub enum Literal {
+pub enum Lit {
     Nat(::num::BigInt),
     Int(::num::BigInt),
     Str(String),
     Tuple{head: TermWithPos, tail: Vec<TermWithPos>},
 }
-impl fmt::Display for Literal {
+impl fmt::Display for Lit {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            Literal::Nat(n) => write!(f, "{}", n),
-            Literal::Int(i) => write!(f, "{:+}", i),
-            Literal::Str(s) => write!(f, "{}", s),
-            Literal::Tuple{head,tail} => {
+            Lit::Nat(n) => write!(f, "{}", n),
+            Lit::Int(i) => write!(f, "{:+}", i),
+            Lit::Str(s) => write!(f, "{}", s),
+            Lit::Tuple{head,tail} => {
                 write!(f, "({:},", head)?;
                 for i in 0..tail.len() {
                     write!(f, " {:}", tail[i])?;

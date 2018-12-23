@@ -10,8 +10,14 @@ fn main(){
 
     match syntax::lex(&source) {
         Ok(lexed) => {
-            for token in lexed {
-                println!("{:?}", token);
+            for (i, token) in lexed.iter().enumerate() {
+                println!("{}: {:?}", i, token);
+            }
+
+            let lexed: Vec<_> = lexed.into_iter().map(|x| x.token).collect();
+            match syntax::parse(&lexed) {
+                Ok(expr) => println!("{}", expr),
+                Err(e) => println!("{:?}", e),
             }
         },
         Err(e) => println!("{}", e),

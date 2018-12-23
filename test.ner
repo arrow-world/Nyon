@@ -1,7 +1,5 @@
-liftc : (a:type, b:type) -> (a -> b) -> sigfun (sigtype::C a) (sigtype::C b)
-
-infix(op_add) + : nat*nat -> nat
-let rec m + n =
-    case n of
-        nat::Z => m
-        nat::S l => nat::S (m + l)
+let list::map f xs = a = 
+    case xs of
+        list::Nil => list::Nil
+        list::Cons ys x => list::Cons (map f ys) (f x)
+in if x = 0 then x else y

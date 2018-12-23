@@ -10,52 +10,59 @@ pub fn lex(top_level: &str) -> Result<Vec<lexer::TokenWithPos>, easy::Errors<cha
     lexer::top_level().skip(eof()).easy_parse(State::new(top_level)).map(|x| x.0)
 }
 
+pub fn parse(top_level: &[lexer::Token]) -> Result<ast::TermWithPos, easy::Errors<lexer::Token, &[lexer::Token], usize>> {
+    parser::expr().skip(eof()).easy_parse(State::new(top_level)).map(|x| x.0)
+}
+
+
 /*
-<term> ::= <ident> | type | <lit> | _ | \( <expr> \) | $ <expr> &( \) | <lex_lf> )
+<term> ::= <ident> | type | <lit> | _ | \( <lfs> <expr> <lfs> \) | $ <lfs> <expr> &( \) | <lex_lf> )
 
-<expr_let> ::= let sep_by1(<patn_match>, <lex_lf>) in <expr>
-<patn_match> ::= <expr> = <expr>
+<expr> ::= <expr_typing> | <expr_abs> | <expr_arrow>
 
-<expr_case> ::= case <expr> of sep_by(<expr> => <expr>, <lex_lf>)
+<expr_let> ::= let <lfs> sep_by1(<patn_match>, <lex_lf>+) <lfs> in <lfs> <expr>
+<patn_match> ::= <expr> <lfs> = <lfs> <expr>
 
-<expr_if> ::= if <expr> then <expr> else <expr>
+<expr_case> ::= case <lfs> <expr> <lfs> of <lfs> sep_by(<expr> <lfs> => <lfs> <expr>, <lex_lf>+)
 
-<expr_tuple> ::= sep_by2(<expr>, \,)
+<expr_if> ::= if <lfs> <expr> <lfs> then <lfs> <expr> <lfs> else <lfs> <expr>
 
-<expr> ::= <expr_tuple> | <expr_arrow> | <expr_primary> | <term>
+<expr_typing> ::= <expr_udi> <lfs> : <lfs> <expr_typer>
+<expr_typer> ::= <expr_abs> | <expr_arrow>
 
-<expr_typing> ::= chainl2(<expr_typed>, :)
-<expr_typed> ::= <expr_abs> | <expr_arrow> | <expr_udi> | <expr_app> | <term>
+<expr_arrow> ::= chainr1(<expr_primary>, <lfs> -> <lfs> )
 
-<expr_udi> ::= sep_by2(<expr_app> | <term>, <lex_op>)
-<lex_op> ::= &!(( -> | \\ | : | \, | :: | _ | \( | \) | = | => | $ | # | \(\* | \*\) ) &!<char_op>) <char_op>+
-
-<expr_app> ::= many2(<term>)
-
-<expr_arrow> ::= chainr2(<expr_primary>, ->)
+<expr_primary> ::= <expr_udi> | <expr_let> | <expr_case> | <expr_if>
 
 <expr_abs> ::= <expr_lam> | <expr_pi>
-<expr_lam> ::= \\ <ident> : (<expr_abs> | <expr_primary>) -> (<expr_abs> | <expr_primary>)
-<expr_pi> ::= \( <ident> : <expr> \) -> (<expr_abs> | <expr_primary>)
+<expr_lam> ::= \\ <lfs> <ident> <lfs> : <lfs> <expr_primary> <lfs> -> <lfs> <expr>
+<expr_pi> ::= \( <lfs> <ident> <lfs> : <lfs> <expr> <lfs> \) <lfs> -> <lfs> <expr>
 
-<expr_primary> ::= <expr_udi> | <expr_app> | <expr_let> | <expr_case> | <expr_if> | <term>
+<expr_udi> ::= sep_by1(<expr_app>, <lfs> <lex_op> <lfs>)
+<lex_op> ::= &!(( -> | \\ | : | \, | :: | _ | \( | \) | => | $ | # | \(\* | \*\) | \[ | ] ) &!<char_op>)
+    <char_op>+
 
-<ident> ::= sep_by(<lex_ident>, ::) <lex_ident>
+<expr_app> ::= chainl1(<term>, ε)
+
+<ident> ::= many(<lfs> <lex_ident>, <lfs> ::) <lfs> <lex_ident>
 <lex_ident> ::= &!(<lex_keyword> &!(<alpha>|<digit>|_)) (<digit>|_)* <alpha> (<alpha>|<digit>|_)*
-<lex_keyword> ::= type | let | in | case | of | if | then | else | data | infix | infix_prio
+<lex_keyword> ::= type | let | in | case | of | if | then | else | data | where | infix | infix_prio
 
-<lit> ::= <lex_nat> | <lex_int> | <lex_str>
+<lit> ::= <lex_nat> | <lex_int> | <lex_str> | <lit_list>
 <lex_nat> ::= <digit>*
 <lex_int> ::= (+|-) <digit>*
 <lex_str> ::= " ( &!" <any> )* "
 
-<lex_lf> ::= \n | ;
+<lit_list> ::= [ sep_end_by( <lfs> <expr>, <lfs> \, ) <lfs> ]
 
-<top_level> ::= sep_by(<statement>, many1(<lex_lf>))
+<lex_lf> ::= \n | ;
+<lfs> ::= <lex_lf>*
+
+<top_level> ::= sep_by(<statement>, <lex_lf>+)
 <statement> ::= <def_datatype> | <decl_infix> | <infix_prio>
 
-<def_datatype> ::= data <ident> : <expr_typed> where <ctor_list>
-<ctor_list> ::= sep_by(<ident> : <expr_typed>, <lex_lf>)
+<def_datatype> ::= data <lfs> <ident> <lfs> : <lfs> <expr_typer> <lfs> where <lfs> <ctor_list>
+<ctor_list> ::= sep_by(<ident> <lfs> : <lfs> <expr_typer>, <lex_lf>+)
 
 <decl_infix> ::= infix <ident> <op>
 <infix_prio> ::= infix_prio many2(<ident>)

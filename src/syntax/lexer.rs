@@ -10,24 +10,15 @@ pub enum Token {
     Op(Op),
     Lit(Lit),
 }
+impl From<TokenWithPos> for Token {
+    fn from(x: TokenWithPos) -> Token { x.token }
+}
 
 #[derive(Clone, PartialEq, Eq, Debug)]
-pub struct TokenPos {
-    pub start: SourcePosition,
-    pub end: SourcePosition,
-}
-
-#[derive(Clone, Debug)]
 pub struct TokenWithPos {
     pub token: Token,
-    pub pos: Option<TokenPos>,
-}
-impl PartialEq for TokenWithPos {
-    fn eq(&self, other: &Self) -> bool { self.token == other.token }
-}
-impl Eq for TokenWithPos {}
-impl From<Token> for TokenWithPos {
-    fn from(token: Token) -> TokenWithPos { TokenWithPos{token, pos: None} }
+    pub start: SourcePosition,
+    pub end: SourcePosition,
 }
 
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
@@ -41,6 +32,7 @@ pub enum Keyword {
     Then,
     Else,
     Data,
+    Where,
     Infix,
     InfixPrio,
 }
@@ -49,7 +41,10 @@ pub enum Keyword {
 pub enum Sep {
     OpenParen,
     CloseParen,
+    OpenBracket,
+    CloseBracket,
     Dollar,
+    Comma,
     Line(LineSep),
 }
 
@@ -64,7 +59,6 @@ pub enum Op {
     Arrow,
     Lambda,
     Typing,
-    Tuple,
     Domain,
     Hole,
     Equal,
@@ -74,9 +68,9 @@ pub enum Op {
 
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
 pub enum Lit {
-    Nat{n: ::num::BigInt},
-    Int{i: ::num::BigInt},
-    Str{s: String},
+    Nat(::num::BigInt),
+    Int(::num::BigInt),
+    Str(String),
 }
 
 pub fn top_level<I>() -> impl Parser<Input = I, Output = Vec<TokenWithPos>>
@@ -96,6 +90,7 @@ fn lex<I>() -> impl Parser<Input = I, Output = TokenWithPos>
 
     let kw = || choice((
         attempt( string("data").map(|_| Keyword::Data) ),
+        attempt( string("where").map(|_| Keyword::Where) ),
         attempt( string("infix").map(|_| Keyword::Infix) ),
         attempt( string("infix_prio").map(|_| Keyword::InfixPrio) ),
         attempt( string("type").map(|_| Keyword::Type) ),
@@ -112,19 +107,20 @@ fn lex<I>() -> impl Parser<Input = I, Output = TokenWithPos>
         token('(').map(|_| Sep::OpenParen),
         token(')').map(|_| Sep::CloseParen),
         token('$').map(|_| Sep::Dollar),
-        newline().map(|_| Sep::Line(LineSep::NewLine)),
+        token('[').map(|_| Sep::OpenBracket),
+        token(']').map(|_| Sep::CloseBracket),
+        token(',').map(|_| Sep::Comma),
         token(';').map(|_| Sep::Line(LineSep::Semicolon)),
-    )).skip(not_followed_by(op_char()));
+    )).skip(not_followed_by(op_char()))
+        .or( newline().map(|_| Sep::Line(LineSep::NewLine)) );
 
     let op = || attempt( choice((
         attempt( string("->").map(|_| Op::Arrow) ),
         attempt( string("::").map(|_| Op::Domain) ),
         attempt( string("=>").map(|_| Op::Matcher) ),
         token(':').map(|_| Op::Typing),
-        token(',').map(|_| Op::Tuple),
         token('_').map(|_| Op::Hole),
         token('\\').map(|_| Op::Lambda),
-        token('=').map(|_| Op::Equal),
     )).skip(not_followed_by(op_char())) )
         .or(many1::<String,_>(op_char()).map(|s| Op::UserDef(s)));
 
@@ -137,7 +133,7 @@ fn lex<I>() -> impl Parser<Input = I, Output = TokenWithPos>
     ));
 
     (position(), token(), position())
-        .map( |(start, token, end)| TokenWithPos{token, pos: Some(TokenPos{start, end})} )
+        .map( |(start, token, end)| TokenWithPos{token, start, end} )
 }
 
 fn ident<I>() -> impl Parser<Input = I, Output = String>
@@ -156,9 +152,9 @@ fn lit<I>() -> impl Parser<Input = I, Output = Lit>
           I::Error: ParseError<I::Item, I::Range, I::Position>,
 {
     choice((
-        attempt( nat().map(|n| Lit::Nat{n}) ),
-        attempt( int().map(|i| Lit::Int{i}) ),
-        attempt( str().map(|s| Lit::Str{s}) ),
+        attempt( nat().map(|n| Lit::Nat(n)) ),
+        attempt( int().map(|i| Lit::Int(i)) ),
+        attempt( str().map(|s| Lit::Str(s)) ),
     ))
 }
 
