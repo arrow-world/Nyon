@@ -1,4 +1,5 @@
 #![allow(non_snake_case)]
+#![recursion_limit = "1024"]
 
 mod current;
 mod signal;

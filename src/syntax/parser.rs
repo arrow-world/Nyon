@@ -147,7 +147,7 @@ fn lit<I>() -> impl Parser<Input = I, Output = ast::Lit>
         else { None }
     ) ).or(
         token(lexer::Token::Sep(lexer::Sep::OpenBracket)).skip(lfs())
-        .with(many(expr().skip(lfs())))
+        .with(sep_end_by(expr(), attempt(lfs().skip(token(lexer::Token::Sep(lexer::Sep::Comma))).skip(lfs()))))
         .skip(token(lexer::Token::Sep(lexer::Sep::CloseBracket)))
         .map(|es| ast::Lit::Tuple(es))
     )

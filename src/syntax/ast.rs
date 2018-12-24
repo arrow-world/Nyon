@@ -138,8 +138,8 @@ impl fmt::Display for Lit {
             Lit::Tuple(es) => {
                 write!(f, "[")?;
                 for i in 0..es.len() {
-                    write!(f, " {:}", es[i])?;
-                    if i < es.len()-1 { write!(f, ",")?; }
+                    write!(f, "{:}", es[i])?;
+                    if i < es.len()-1 { write!(f, ", ")?; }
                 }
                 write!(f, "]")
             },
