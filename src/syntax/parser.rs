@@ -134,10 +134,10 @@ parser! {
 }
 
 fn lit<I>() -> impl Parser<Input = I, Output = ast::Lit>
-    where I: Stream<Item = lexer::Token>,
+    where I: Stream<Item = lexer::Token, Position = usize>,
           I::Error: ParseError<I::Item, I::Range, I::Position>,
 {
-    satisfy_map( |t| if let lexer::Token::Lit(lit) = t {
+    attempt( satisfy_map( |t| if let lexer::Token::Lit(lit) = t {
             Some( match lit {
                 lexer::Lit::Nat(n) => ast::Lit::Nat(n),
                 lexer::Lit::Int(i) => ast::Lit::Int(i),
@@ -145,6 +145,11 @@ fn lit<I>() -> impl Parser<Input = I, Output = ast::Lit>
             } )
         }
         else { None }
+    ) ).or(
+        token(lexer::Token::Sep(lexer::Sep::OpenBracket)).skip(lfs())
+        .with(many(expr().skip(lfs())))
+        .skip(token(lexer::Token::Sep(lexer::Sep::CloseBracket)))
+        .map(|es| ast::Lit::Tuple(es))
     )
 }
 

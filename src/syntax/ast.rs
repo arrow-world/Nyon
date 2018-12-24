@@ -127,7 +127,7 @@ pub enum Lit {
     Nat(::num::BigInt),
     Int(::num::BigInt),
     Str(String),
-    Tuple{head: TermWithPos, tail: Vec<TermWithPos>},
+    Tuple(Vec<TermWithPos>),
 }
 impl fmt::Display for Lit {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
@@ -135,13 +135,13 @@ impl fmt::Display for Lit {
             Lit::Nat(n) => write!(f, "{}", n),
             Lit::Int(i) => write!(f, "{:+}", i),
             Lit::Str(s) => write!(f, "{}", s),
-            Lit::Tuple{head,tail} => {
-                write!(f, "({:},", head)?;
-                for i in 0..tail.len() {
-                    write!(f, " {:}", tail[i])?;
-                    if i < tail.len()-1 { write!(f, ",")?; }
+            Lit::Tuple(es) => {
+                write!(f, "[")?;
+                for i in 0..es.len() {
+                    write!(f, " {:}", es[i])?;
+                    if i < es.len()-1 { write!(f, ",")?; }
                 }
-                write!(f, ")")
+                write!(f, "]")
             },
         }
     }
