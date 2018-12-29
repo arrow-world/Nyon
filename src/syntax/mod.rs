@@ -1,27 +1,46 @@
-mod ast;
-mod parser;
+pub mod ast;
 mod lexer;
+mod parser;
 
 use combine::*;
-use combine::parser::char::*;
 use combine::stream::{state::{SourcePosition, State}, easy};
 
 pub fn lex(top_level: &str) -> Result<Vec<lexer::TokenWithPos>, easy::Errors<char, &str, SourcePosition>> {
     lexer::top_level().skip(eof()).easy_parse(State::new(top_level)).map(|x| x.0)
 }
 
-pub fn parse(top_level: &[lexer::Token]) -> Result<ast::TermWithPos, easy::Errors<lexer::Token, &[lexer::Token], usize>> {
-    parser::expr().skip(eof()).easy_parse(State::new(top_level)).map(|x| x.0)
+pub fn parse_env(top_level: &[lexer::Token])
+    -> Result<ast::Env, easy::Errors<lexer::Token, &[lexer::Token], usize>>
+{
+    parser::env().skip(eof()).easy_parse(State::new(top_level)).map(|x| x.0)
 }
 
+/* #[derive(Clone, PartialEq, Eq)]
+pub enum Error {
+    Lex(LexError),
+    Parse(ParseError),
+}
+
+#[derive(Clone, PartialEq, Eq)]
+pub struct LexError {
+    pos: SourcePosition,
+    unexpected: Vec<easy::Info<char, &str>>,
+    expected: Vec<easy::Info<char, &str>>,
+}
+
+#[derive(Clone, PartialEq, Eq)]
+pub struct ParseError {
+    start: SourcePosition,
+    end: SourcePosition,
+    unexpected: Vec<easy::Info<>
+} */
 
 /*
 <term> ::= <ident> | type | <lit> | _ | \( <lfs> <expr> <lfs> \) | $ <lfs> <expr> &( \) | <lex_lf> )
 
 <expr> ::= <expr_typing> | <expr_abs> | <expr_arrow>
 
-<expr_let> ::= let <lfs> sep_by1(<patn_match>, <lex_lf>+) <lfs> in <lfs> <expr>
-<patn_match> ::= <expr> <lfs> = <lfs> <expr>
+<expr_let> ::= let <lfs> <env> <lfs> in <lfs> <expr>
 
 <expr_case> ::= case <lfs> <expr> <lfs> of <lfs> sep_by(<expr> <lfs> => <lfs> <expr>, <lex_lf>+)
 
@@ -39,7 +58,7 @@ pub fn parse(top_level: &[lexer::Token]) -> Result<ast::TermWithPos, easy::Error
 <expr_pi> ::= \( <lfs> <ident> <lfs> : <lfs> <expr> <lfs> \) <lfs> -> <lfs> <expr>
 
 <expr_udi> ::= sep_by1(<expr_app>, <lfs> <lex_op> <lfs>)
-<lex_op> ::= &!(( -> | \\ | : | \, | :: | _ | \( | \) | => | $ | # | \(\* | \*\) | \[ | ] ) &!<char_op>)
+<lex_op> ::= &!(( -> | \\ | : | \, | :: | _ | \( | \) | => | := | $ | # | \(\* | \*\) | [ | ] { | }) &!<char_op>)
     <char_op>+
 
 <expr_app> ::= chainl1(<term>, ε)
@@ -58,14 +77,16 @@ pub fn parse(top_level: &[lexer::Token]) -> Result<ast::TermWithPos, easy::Error
 <lex_lf> ::= \n | ;
 <lfs> ::= <lex_lf>*
 
-<top_level> ::= sep_by(<statement>, <lex_lf>+)
-<statement> ::= <def_datatype> | <decl_infix> | <infix_prio>
+<env> ::= sep_by(<statement>, <lex_lf>+)
+<statement> ::= <def_datatype> | <def_infix> | <infix_prio> | <def> | <expr_typing>
 
 <def_datatype> ::= data <lfs> <ident> <lfs> : <lfs> <expr_typer> <lfs> where <lfs> <ctor_list>
 <ctor_list> ::= sep_by(<ident> <lfs> : <lfs> <expr_typer>, <lex_lf>+)
 
-<decl_infix> ::= infix <ident> <op>
-<infix_prio> ::= infix_prio many2(<ident>)
+<def_infix> ::= infix <lfs> <op> <lfs> <ident>
+<infix_prio> ::= infix_prio <lfs> many2(<ident> <lfs>)
+
+<def> ::= <expr> <lfs> := <lfs> <expr>
 
 <comment> ::= # (&!\n <any>)* | \(\* ( &!( \*\) ) <any> )* \*\)
 */

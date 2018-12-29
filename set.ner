@@ -1,0 +1,41 @@
+module prop
+    Prop : Type
+
+    infix --> impl
+    impl : Prop -> Prop -> Prop
+    impl P Q := P -> Q
+
+    infix /\ and
+    and : Prop -> Prop -> Prop
+    
+    infix <-> iff
+    iff : Prop -> Prop -> Prop
+    iff P Q = (P --> Q) /\ (Q --> P)
+
+    ⊥ : Prop
+    explosion: (T:Type) -> ⊥ -> T
+
+    not P := P -> ⊥
+
+    exists x 
+
+module ZFC
+    Set : Type
+
+    infix = set_eq
+    set_eq : Set -> Set -> Prop
+
+    infix ∈ set_in
+    set_in : Set -> Set -> Prop
+
+    ax_extensionality :=
+        (x:Set) -> (y:Set) -> ((z:Set) -> (z ∈ x <-> z ∈ y)) -> x = y
+
+    ax_regularity :=
+        (x:Set) -> 
+
+module peano
+    Nat : Type
+    Z : Nat
+    S : Nat -> Nat
+    Ind : (p:Nat->Prop) -> (p Z) -> ((n:Nat) -> p n -> p (S n)) -> ((n:Nat) -> p n)

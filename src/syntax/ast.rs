@@ -1,5 +1,3 @@
-use combine::stream::PointerOffset;
-use combine::stream::state::SourcePosition;
 use std::fmt;
 
 #[derive(Clone, Debug)]
@@ -9,9 +7,9 @@ pub enum Term {
     App{f: TermWithPos, x: TermWithPos},
     Pi{x: Ident, A: TermWithPos, B: TermWithPos},
     Arrow{A: TermWithPos, B: TermWithPos},
-    Infix(Infix),
+    // Infix(Infix),
     Typing(Typing),
-    Let{defs: Vec<(TermWithPos, TermWithPos)>, body: TermWithPos},
+    Let{env: Env, body: TermWithPos},
     Lam{x: Ident, A: TermWithPos, t: TermWithPos},
     Case{t: TermWithPos, arms: Vec<Arm>},
     If{p: TermWithPos, tv: TermWithPos, fv: TermWithPos},
@@ -26,17 +24,9 @@ impl fmt::Display for Term {
             Term::App{f:_f,x} => write!(f, "({} {})", _f, x),
             Term::Pi{x,A,B} => write!(f, "Π({}:{}){}", x, A, B),
             Term::Arrow{A,B} => write!(f, "({} -> {})", A, B),
-            Term::Infix(i) => write!(f, "({})", i),
+            // Term::Infix(i) => write!(f, "({})", i),
             Term::Typing(ty) => write!(f, "({})", ty),
-            Term::Let{defs, body} => {
-                write!(f, "(let ")?;
-                for i in 0..defs.len() {
-                    let (ref lhs, ref rhs) = defs[i];
-                    write!(f, "{} = {}", lhs, rhs)?;
-                    if i < defs.len()-1 { write!(f, "; ")?; }
-                }
-                write!(f, " in {})", body)
-            },
+            Term::Let{env, body} => write!(f, "(let {} in {})", env, body),
             Term::Lam{x,A,t} => write!(f, "(λ{}:{}.{})", x, A, t),
             Term::Case{t, arms} => {
                 write!(f, "(case {} of ", t)?;
@@ -147,19 +137,53 @@ impl fmt::Display for Lit {
     }
 }
 
+#[derive(Clone, Debug)]
+pub struct Env(pub Vec<Statement>);
+impl fmt::Display for Env {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        let Env(stats) = self;
+        for i in 0..stats.len() {
+            write!(f, "{}", stats[i])?;
+            if i < stats.len()-1 { write!(f, "; ")?; }
+        }
+        Ok(())
+    }
+}
+
+#[derive(Clone, Debug)]
 pub enum Statement {
-    Data{ident: IdentDef, T: TermWithPos, ctors: Vec<Ctor>},
+    Data{ident: Ident, T: TermWithPos, ctors: Vec<Ctor>},
+    // DefInfix{op: Op, name: Ident},
+    // InfixPrio{head: Ident, tail: Vec<Ident>},
+    Def(TermWithPos, TermWithPos),
     Typing(Typing),
-    Let{patn: TermWithPos, t: TermWithPos},
-    InfixPrio{infixs: Vec<Ident>}
+}
+impl fmt::Display for Statement {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            Statement::Data{ident, T, ctors} => {
+                write!(f, "data {} : {} where (", ident, T)?;
+                for i in 0..ctors.len() {
+                    let ref ctor = ctors[i];
+                    write!(f, "{} : {}", ctor.patn, ctor.T)?;
+                    if i < ctors.len()-1 { write!(f, "; ")?; }
+                }
+                write!(f, ")")
+            },
+            // Statement::DefInfix{op: Op(op), name} => write!(f, "infix {} {}", op, name),
+            /* Statement::InfixPrio{head, tail} => {
+                write!(f, "infix_prio {}", head)?;
+                for x in tail { write!(f, " {}", x)?; }
+                Ok(())
+            }, */
+            Statement::Def(l,r) => write!(f, "{} := {}", l, r),
+            Statement::Typing(Typing{x,T}) => write!(f, "{} : {}", x, T),
+        }
+    }
 }
 
-pub enum IdentDef {
-    Ident(Ident),
-    Infix{name: Ident, ops: Vec<Op>},
-}
-
+#[derive(Clone, Debug)]
 pub struct Ctor {
-    ident: IdentDef,
-    T: TermWithPos,
+    pub patn: Ident,
+    pub T: TermWithPos,
 }

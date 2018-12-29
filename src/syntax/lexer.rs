@@ -43,6 +43,8 @@ pub enum Sep {
     CloseParen,
     OpenBracket,
     CloseBracket,
+    OpenBrace,
+    CloseBrace,
     Dollar,
     Comma,
     Line(LineSep),
@@ -61,7 +63,7 @@ pub enum Op {
     Typing,
     Domain,
     Hole,
-    Equal,
+    Def,
     Matcher,
     UserDef(String),
 }
@@ -77,8 +79,12 @@ pub fn top_level<I>() -> impl Parser<Input = I, Output = Vec<TokenWithPos>>
     where I: Stream<Item = char, Position = SourcePosition>,
           I::Error: ParseError<I::Item, I::Range, I::Position>,
 {
-    let spaces = || many::<(),_>(not_followed_by(newline()).skip(space()));
-    spaces().with(many(lex().skip(spaces())))
+    let token_sep = || many::<(),_>(not_followed_by(newline()).skip(space()));
+    let comment = || attempt( string("#").skip(many::<(),_>(not_followed_by(newline()).skip(any()))).skip(newline()) )
+        .or(attempt( string("(*").skip(many::<(),_>(not_followed_by(string("*)")))).skip(string("*)")) ))
+        .with(value(()));
+
+    token_sep().with(many(lex().skip(attempt(token_sep()).or(comment()))))
 }
 
 fn lex<I>() -> impl Parser<Input = I, Output = TokenWithPos>
@@ -91,8 +97,8 @@ fn lex<I>() -> impl Parser<Input = I, Output = TokenWithPos>
     let kw = || choice((
         attempt( string("data").map(|_| Keyword::Data) ),
         attempt( string("where").map(|_| Keyword::Where) ),
-        attempt( string("infix").map(|_| Keyword::Infix) ),
         attempt( string("infix_prio").map(|_| Keyword::InfixPrio) ),
+        attempt( string("infix").map(|_| Keyword::Infix) ),
         attempt( string("type").map(|_| Keyword::Type) ),
         attempt( string("let").map(|_| Keyword::Let) ),
         attempt( string("in").map(|_| Keyword::In) ),
@@ -106,16 +112,18 @@ fn lex<I>() -> impl Parser<Input = I, Output = TokenWithPos>
     let sep = || choice((
         token('(').map(|_| Sep::OpenParen),
         token(')').map(|_| Sep::CloseParen),
-        token('$').map(|_| Sep::Dollar),
         token('[').map(|_| Sep::OpenBracket),
         token(']').map(|_| Sep::CloseBracket),
+        token('{').map(|_| Sep::OpenBrace),
+        token('}').map(|_| Sep::CloseBrace),
+        token('$').map(|_| Sep::Dollar),
         token(',').map(|_| Sep::Comma),
         token(';').map(|_| Sep::Line(LineSep::Semicolon)),
-    )).skip(not_followed_by(op_char()))
-        .or( newline().map(|_| Sep::Line(LineSep::NewLine)) );
+    )).or( newline().map(|_| Sep::Line(LineSep::NewLine)) );
 
     let op = || attempt( choice((
         attempt( string("->").map(|_| Op::Arrow) ),
+        attempt( string(":=").map(|_| Op::Def) ),
         attempt( string("::").map(|_| Op::Domain) ),
         attempt( string("=>").map(|_| Op::Matcher) ),
         token(':').map(|_| Op::Typing),
@@ -143,8 +151,8 @@ fn ident<I>() -> impl Parser<Input = I, Output = String>
     use std::iter::{FromIterator, once};
     let us = || token('_');
 
-    (many::<String,_>(digit().or(us())), letter(), many::<String, _>(alpha_num().or(us())))
-        .map( |(sl,ch,sr)| String::from_iter( sl.chars().chain(once(ch)).chain(sr.chars())))
+    (many::<String,_>(digit().or(us())), letter(), many::<String, _>(alpha_num().or(us())), many::<String,_>(token('\'')))
+        .map( |(sl,ch,sr,ap)| String::from_iter( sl.chars().chain(once(ch)).chain(sr.chars()).chain(ap.chars()) ))
 }
 
 fn lit<I>() -> impl Parser<Input = I, Output = Lit>

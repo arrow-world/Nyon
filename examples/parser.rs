@@ -15,7 +15,7 @@ fn main(){
             }
 
             let lexed: Vec<_> = lexed.into_iter().map(|x| x.token).collect();
-            match syntax::parse(&lexed) {
+            match syntax::parse_env(&lexed) {
                 Ok(expr) => println!("{}", expr),
                 Err(e) => println!("{:?}", e),
             }
