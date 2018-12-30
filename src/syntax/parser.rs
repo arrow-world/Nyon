@@ -250,7 +250,7 @@ fn ident<I>() -> impl Parser<Input = I, Output = ast::Ident>
 {
     let lex = || satisfy_map(|t| if let lexer::Token::Ident(s) = t {Some(s)} else {None});
     many(attempt( lex().skip(token(lexer::Token::Op(lexer::Op::Domain))) )).and(lex())
-        .map(|(dns, name)| ast::Ident{domain: ast::Domain(dns), name})
+        .map(|(dns, name)| ast::Ident{domain: dns, name})
 }
 
 fn lf<I>() -> impl Parser<Input = I, Output = lexer::Token> 

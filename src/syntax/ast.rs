@@ -1,4 +1,5 @@
 use std::fmt;
+use std::rc::Rc;
 
 #[derive(Clone, Debug)]
 pub enum Term {
@@ -56,16 +57,13 @@ impl fmt::Display for TermWithPos {
 }
 
 #[derive(Clone, Debug)]
-pub struct Domain(pub Vec<String>);
-
-#[derive(Clone, Debug)]
 pub struct Ident {
-    pub domain: Domain,
+    pub domain: Vec<String>,
     pub name: String,
 }
 impl fmt::Display for Ident {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        for domain_name in &self.domain.0 {
+        for domain_name in &self.domain {
             write!(f, "{}::", domain_name)?;
         }
         write!(f, "{}", self.name)
@@ -148,6 +146,14 @@ impl fmt::Display for Env {
         }
         Ok(())
     }
+}
+
+#[derive(Clone, Debug)]
+pub struct Module {
+    pub env: Env,
+    pub name: String,
+    pub parents: Vec<Rc<Module>>,
+    pub children: Vec<Rc<Module>>,
 }
 
 #[derive(Clone, Debug)]

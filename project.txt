@@ -12,3 +12,20 @@
 2.1 IOLibでDAWを実装
 
 3. 曲を作る
+
+Reflection System
+
+data Def : Type -> Type where
+    Def : 'K -> 'V -> (k:K) -> (v:V) -> Def K
+
+data Typing : Type -> Type where
+    Typing : 'K -> 'S -> (k:K) -> (T:S) -> Typing K
+
+data DataType : Type -> Type where
+    DataType : 'K -> 
+
+data Module : Type -> Type where
+    Empty : 'K -> Module K
+    AddDef : 'K -> Module K -> Def K -> Module K
+    AddTyping : 'K -> Module K -> Typing K -> Module K
+    AddDataType : 'K -> Module K -> DataType K -> Module K

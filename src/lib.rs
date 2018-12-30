@@ -2,8 +2,7 @@
 #![recursion_limit = "2048"]
 
 pub mod syntax;
-mod env;
-mod idgen;
+pub mod core;
 
 extern crate combine;
 extern crate num;
