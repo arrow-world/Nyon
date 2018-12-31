@@ -44,25 +44,29 @@ pub fn subst(s: Rc<Term>, i: u64, t: Rc<Term>) -> Rc<Term> {
             Rc::new(Term::App{s: subst(M.clone(), i, t.clone()), t: subst(N.clone(), i, t)}),
         Term::Lam(ref abs) => Rc::new(Term::Lam(abs.clone().subst(i, t))),
         Term::Pi(ref abs) => Rc::new(Term::Pi(abs.clone().subst(i, t))),
-        Term::Let(ref env, ref M) => /*Rc::new(Term::Let(
+        Term::Let(ref env, ref M) => Rc::new(Term::Let(
             Env {
-                datatypes:
-                    env.datatypes.iter().map( |datatype|
-                        DataType {
-                            ctors_type:
-                                datatype.ctors_type.iter()
-                                    .map(|ctor_type| subst(ctor_type.clone(), i, t.clone())).collect()
-                        }
-                    ).collect(),
-                defs:
-                    env.defs.iter().map(|def| subst(def.clone(), i, t.clone())).collect(),
+                consts:
+                    env.consts.iter().map(|c| match c {
+                        super::Const::DataType(datatype) =>
+                            super::Const::DataType( DataType {
+                                param_types:
+                                    datatype.param_types.iter()
+                                        .map(|param_type| subst(param_type.clone(), i, t.clone())).collect(),
+                                ctor_types:
+                                    datatype.ctor_types.iter()
+                                        .map(|ctor_type| subst(ctor_type.clone(), i, t.clone())).collect(),
+                            } ),
+                        super::Const::Def(def) => super::Const::Def( subst(def.clone(), i, t.clone()) ),
+                    }).collect(),
                 typings:
                     env.typings.iter().map( |(M, T)|
                         (subst(M.clone(), i, t.clone()), subst(T.clone(), i, t.clone()))
                     ).collect(),
+                idgen: env.idgen.clone(),
             },
             subst(M.clone(), i, t),
-        ))*/ unimplemented!(),
+        )),
         Term::Case{t: ref M, ref cases} =>
             Rc::new(Term::Case{
                 cases: cases.iter().map(|abs| abs.clone().subst(i, t.clone())).collect(),
@@ -78,7 +82,9 @@ pub fn subst(s: Rc<Term>, i: u64, t: Rc<Term>) -> Rc<Term> {
 
 pub fn norm(ctx: &Ctx, t: Rc<Term>) -> Rc<Term> {
     match *t.clone() {
-        Term::Const(id) => ctx.global.defs[id as usize].clone(),
+        Term::Const(id) =>
+            if let super::Const::Def(ref u) = ctx.global.consts[id as usize] { u.clone() }
+            else { t },
         Term::DBI(i) => ctx.local[i as usize].clone(),
         Term::App{s: ref M, t: ref N} => {
             let M = norm(ctx, M.clone());

@@ -3,7 +3,6 @@ mod term;
 mod idgen;
 mod translator;
 
-use syntax::ast;
 use self::term::Term;
 use self::module::Module;
 use self::idgen::Generator;
@@ -37,7 +36,7 @@ impl<'s> TopLevel<'s> {
 pub struct Env {
     pub consts: Vec<Const>,
     pub typings: Vec<(Rc<Term>, Rc<Term>)>,
-    pub idgen: idgen::Inc<ConstId>,
+    idgen: idgen::Inc<ConstId>,
 }
 impl Env {
     pub fn new() -> Self {
