@@ -1,0 +1,34 @@
+﻿依存型システム下の制限された型推論器:
+0. すべての項の型を，IDを割り振った推論型とする．Holeは推論型に置き換える．
+1. 型アノテーションがついているところで推論型とアノテーションをunify．
+2. 推論型が付いている文脈上のすべての項を走査．項の種類で場合分けて推論する．項の型が推論可能であるとき，推論型とunify．
+3. 推論型が存在しなければ完了．推論型が存在して，なおかつ型項がこれ以上簡約できなくなったら，失敗．
+
+型aと型bのn次,最大長mのunification:
+a,bそれぞれについて，関数適用でありなおかつ型が既についている場合，正規形が存在するはずなので正規化する．
+型がついていない場合停止性が保証されないため，a,bをそれぞれ高々n回だけ簡約し，正規化されたものと見なす．
+nが十分大きいとき，a,bはそれぞれ強正規形ならば正規化される．
+このとき，a,bが爆発しメモリが不足するおそれがあるため，それぞれ項長がmを超えたとき簡約を停止することで爆発を防ぐ．
+a,bを項の種類で場合分けて再帰的に比較する．片方が推論型で片方が具体型であるような構造のとき，推論型を具体型に置き換える．
+
+is_some : {'a} -> Option a -> Bool
+is_some x := case x of Option::Some y => Bool::True; Option::None => Bool::False
+t := is_some $ Option::Some 114514
+
+- translation into core-lang
+
+is_some : (a:type) -> Option a -> Bool
+is_some := \a:_.\x:_. case x of Option::Some _ y => Bool::True; Option::None _ => Bool::False
+t := is_some ( Option::Some _ 114514 )
+
+- type inference
+
+is_some := (\a:#0.\x:#1.
+    (case x:#2 of Option::Some:#3 _:#4 y:#5 => Bool::True:#6; Option::None:#7 _:#8 => Bool::False:#9):#10):#11
+t := (is_some:#12 ( Option::Some:#13 _:#14 114514:#15 )):#16
+is_some : ((a:type) -> (Option:#17 a:#18 -> Bool:#19):#20):#21
+
+    unify ((a:type) -> (Option:#17 a:#18 -> Bool:#19):#20):#21 #11
+        #11 = ((a:type) -> (Option:#17 a:#18 -> Bool:#19):#20):#21
+
+    unify #0 #1

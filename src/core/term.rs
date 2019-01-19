@@ -3,7 +3,7 @@ use super::{Ctx, DataType, Env};
 
 use std::rc::Rc;
 
-#[derive(Clone, PartialEq, Eq, Debug)]
+#[derive(Clone, Debug)]
 pub enum Term {
     Const(ConstId),
     DBI(u64),
@@ -11,7 +11,7 @@ pub enum Term {
     App{s: Rc<Term>, t: Rc<Term>},
     Lam(Abs),
     Pi(Abs),
-    Let(Env, Rc<Term>),
+    Let(LetEnv, Rc<Term>),
     Case{t: Rc<Term>, cases: Vec<Abs>},
     Typing{x: Rc<Term>, T: Rc<Term>},
     Nat(::num::BigInt),
@@ -20,10 +20,21 @@ pub enum Term {
     Tuple(Vec<Rc<Term>>),
 }
 
-#[derive(Clone, PartialEq, Eq, Debug)]
+#[derive(Clone, Debug)]
+pub struct LetEnv {
+    consts: Vec<super::Const>,
+}
+impl From<Env> for LetEnv {
+    fn from(env: Env) -> Self { LetEnv {consts: env.consts} }
+}
+impl<'a> From<&'a Env> for LetEnv {
+    fn from(env: &Env) -> Self { LetEnv {consts: env.consts.clone()} }
+}
+
+#[derive(Clone, Debug)]
 pub struct Abs {
-    A: Rc<Term>,
-    t: Rc<Term>,
+    pub A: Rc<Term>,
+    pub t: Rc<Term>,
 }
 impl Abs {
     pub fn subst(self, i: u64, t: Rc<Term>) -> Abs {
@@ -45,26 +56,30 @@ pub fn subst(s: Rc<Term>, i: u64, t: Rc<Term>) -> Rc<Term> {
         Term::Lam(ref abs) => Rc::new(Term::Lam(abs.clone().subst(i, t))),
         Term::Pi(ref abs) => Rc::new(Term::Pi(abs.clone().subst(i, t))),
         Term::Let(ref env, ref M) => Rc::new(Term::Let(
-            Env {
+            /*Env {
                 consts:
                     env.consts.iter().map(|c| match c {
-                        super::Const::DataType(datatype) =>
-                            super::Const::DataType( DataType {
-                                param_types:
-                                    datatype.param_types.iter()
-                                        .map(|param_type| subst(param_type.clone(), i, t.clone())).collect(),
-                                ctor_types:
-                                    datatype.ctor_types.iter()
-                                        .map(|ctor_type| subst(ctor_type.clone(), i, t.clone())).collect(),
-                            } ),
                         super::Const::Def(def) => super::Const::Def( subst(def.clone(), i, t.clone()) ),
+                        super::Const::DataType{param_types} =>
+                            super::Const::DataType {
+                                param_types:
+                                    param_types.iter()
+                                        .map(|param_type| subst(param_type.clone(), i, t.clone())).collect(),
+                            },
+                        super::Const::Ctor{datatype, arg_types} =>
+                            super::Const::Ctor {
+                                datatype: *datatype,
+                                arg_types:
+                                    arg_types.iter()
+                                        .map(|arg_type| subst(arg_type.clone(), i, t.clone())).collect(),
+                            },
                     }).collect(),
                 typings:
                     env.typings.iter().map( |(M, T)|
                         (subst(M.clone(), i, t.clone()), subst(T.clone(), i, t.clone()))
                     ).collect(),
-                idgen: env.idgen.clone(),
-            },
+                module: env.module.clone(),
+            }*/ unimplemented!(),
             subst(M.clone(), i, t),
         )),
         Term::Case{t: ref M, ref cases} =>
@@ -90,7 +105,7 @@ pub fn norm(ctx: &Ctx, t: Rc<Term>) -> Rc<Term> {
             let M = norm(ctx, M.clone());
             let N = norm(ctx, N.clone());
             if let Term::Lam(Abs{ref A, t: ref M}) = *M {
-                let M = subst(M.clone(), 0, t);
+                let M = subst(M.clone(), 0, N);
                 norm(ctx, M)
             }
             else { t }
@@ -99,7 +114,7 @@ pub fn norm(ctx: &Ctx, t: Rc<Term>) -> Rc<Term> {
         Term::Pi(ref abs) => Rc::new(Term::Pi(abs.clone().norm(ctx))),
         Term::Let(ref env, ref M) => {
             let mut ctx = ctx.clone();
-            ctx.global.extend(env.clone());
+            ctx.global.extend(unimplemented!()/*env.clone()*/);
             norm(&ctx, M.clone())
         },
         Term::Case{t: ref M, ref cases} => {

@@ -56,7 +56,7 @@ impl fmt::Display for TermWithPos {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, PartialEq, Eq, Hash, Debug)]
 pub struct Ident {
     pub domain: Vec<String>,
     pub name: String,
@@ -152,8 +152,7 @@ impl fmt::Display for Env {
 pub struct Module {
     pub env: Env,
     pub name: String,
-    pub parents: Vec<Rc<Module>>,
-    pub children: Vec<Rc<Module>>,
+    pub children: Vec<Box<Module>>,
 }
 
 #[derive(Clone, Debug)]
