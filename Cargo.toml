@@ -1,7 +1,7 @@
 [package]
-name = "lassy"
+name = "diyusi"
 version = "0.1.0"
-authors = ["rn"]
+authors = ["Ner"]
 
 [dependencies]
 # rustc-llvm-proxy = "0.1"

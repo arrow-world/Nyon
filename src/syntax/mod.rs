@@ -2,18 +2,8 @@ pub mod ast;
 mod lexer;
 mod parser;
 
-use combine::*;
-use combine::stream::{state::{SourcePosition, State}, easy};
-
-pub fn lex(top_level: &str) -> Result<Vec<lexer::TokenWithPos>, easy::Errors<char, &str, SourcePosition>> {
-    lexer::top_level().skip(eof()).easy_parse(State::new(top_level)).map(|x| x.0)
-}
-
-pub fn parse_env(top_level: &[lexer::Token])
-    -> Result<ast::Env, easy::Errors<lexer::Token, &[lexer::Token], usize>>
-{
-    parser::env().skip(eof()).easy_parse(State::new(top_level)).map(|x| x.0)
-}
+pub use self::lexer::lex_src;
+pub use self::parser::parse_env;
 
 /* #[derive(Clone, PartialEq, Eq)]
 pub enum Error {

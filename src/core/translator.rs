@@ -4,21 +4,17 @@ use core::typechk;
 
 use std::rc::Rc;
 use std::collections::HashMap;
-use std::iter;
 
-pub fn translate_module<'a>(ast: ast::Module) -> Result<(core::Env, Rc<core::modules::Scope>), TranslateErr> {
+pub fn translate_module<'a>(ast: ast::Module) -> Result<(core::Env, Rc<core::modules::Scope>), Vec<TranslateErr>> {
     let mut regctx = RegisterCtx::new(core::modules::Scope::top());
-    register_module(&mut regctx, ast)?;
+    register_module(&mut regctx, ast).map_err(|x| vec![x])?;
 
-    regctx.env.consts.reserve(regctx.consts.len());
-    for c in regctx.consts.split_off(0) {
-        let c = translate_const(c, &mut regctx)?;
-        regctx.env.consts.push(c);
-    }
+    translate_all(&mut regctx).unwrap_or_else(|e| {
+        regctx.errors.push(e);
+    });
 
-    regctx.env.typings.reserve(regctx.typings.len());
-
-    Ok((regctx.env, regctx.scope))
+    if regctx.errors.is_empty() { Ok((regctx.env, regctx.scope)) }
+    else { Err(regctx.errors) }
 }
 
 fn translate_all(regctx: &mut RegisterCtx) -> Result<(), TranslateErr> {
@@ -26,15 +22,19 @@ fn translate_all(regctx: &mut RegisterCtx) -> Result<(), TranslateErr> {
 
     regctx.env.consts.reserve(regctx.consts.len());
     for c in regctx.consts.split_off(0) {
-        let c = translate_const(c, regctx)?;
+        let c = translate_const(c, regctx).map_err(|e| regctx.errors.push(e)).ok();
         regctx.env.consts.push(c);
     }
 
     regctx.env.typings.reserve(regctx.typings.len());
     for t in regctx.typings.split_off(0) {
-        let t = translate_typing(t, regctx)?;
+        let t = translate_typing(t, regctx).map_err(|e| regctx.errors.push(e)).ok();
         regctx.env.typings.push(t);
     }
+
+    assert!(regctx.consts.is_empty());
+    assert!(regctx.typings.is_empty());
+    assert!(regctx.ac.vars.is_empty());
 
     Ok(())
 }
@@ -88,7 +88,7 @@ fn translate_term(term: ast::TermWithPos, regctx: &mut RegisterCtx) -> Result<Rc
         ast::Term::Typing(ast::Typing{x,T}) => {
             let x = translate_term(x, regctx)?;
             let T = translate_term(T, regctx)?;
-            regctx.env.typings.push((x.clone(), T));
+            regctx.env.typings.push(Some( (x.clone(), T) ));
             x
         },
         ast::Term::Let{env: letenv, body} => {
@@ -98,40 +98,73 @@ fn translate_term(term: ast::TermWithPos, regctx: &mut RegisterCtx) -> Result<Rc
             register_env(&mut local_regctx, letenv)?;
             let t = translate_term(body, &mut local_regctx)?;
 
-            translate_all(&mut local_regctx);
+            translate_all(&mut local_regctx)?;
 
             Rc::new( core::HoledTerm::Let{env: local_regctx.env.into(), t} )
         },
         ast::Term::Case{t, arms} => {
-            let mut cases: Vec<Option<Rc<typechk::HoledTerm>>> = vec![None; arms.len()];
-            let mut datatype: Option<core::ConstId> = None;
-            for arm in arms {
+            let translated_arms: Vec<(CtorInfo, Rc<typechk::HoledTerm>)> = arms.into_iter().map( |arm| {
                 let ctor_err = TranslateErr::ExpectedIdentOfCtor(arm.patn.clone());
 
                 let (ctor_cid, body) = translate_arm(arm, regctx)?;
-                if let Some(CtorInfo{datatype: arm_datatype, ctor_id}) = regctx.ctor_info.get(&ctor_cid) {
-                    if let Some(expected_datatype) = datatype {
-                        if *arm_datatype != expected_datatype {
-                            return Err(TranslateErr::MismatchDataType(term_with_pos));
-                        }
+                regctx.ctor_info.get(&ctor_cid).map(|ctor_info| (ctor_info.clone(), body)).ok_or(ctor_err)
+            } ).collect::<Result<_,_>>()?;
 
-                        cases[*ctor_id] = Some(body);
-                    }
-                    else { datatype = Some(*arm_datatype); }
+            let datatype = translated_arms.first().map(|(ctor_info,_)| ctor_info.datatype);
+
+            if let Some(datatype) = datatype {
+                let mismatch_datatype_arms: Vec<usize> =
+                    translated_arms.iter().enumerate()
+                        .filter(|(_, (ctor_info,_))| ctor_info.datatype != datatype).map(|(arm_no, _)| arm_no)
+                        .collect();
+                if !mismatch_datatype_arms.is_empty() {
+                    regctx.errors.push(TranslateErr::MismatchDataType {
+                        expr: term_with_pos.clone(),
+                        arms_no: mismatch_datatype_arms,
+                    })
                 }
-                else { return Err(ctor_err); }
             }
+
+            let mut cases = vec![ (None, vec![]);
+                datatype.map(|datatype| regctx.datatype_info[&datatype].ctors.len()).unwrap_or(0)];
+            for (arm_no, (ctor_info, body)) in translated_arms.into_iter().enumerate() {
+                let (ref mut case_body, ref mut arms_no) = cases[ctor_info.ctor_id];
+                if case_body.is_none() {
+                    *case_body = Some(body);
+                }
+                arms_no.push(arm_no);
+            }
+            let cases = cases;
+            
+            let duplicated_cases: Vec<_> = cases.iter().filter(|(_,arms_no)| arms_no.len() > 1)
+                .map(|(_,arms_no)| arms_no.clone()).collect();
+            if !duplicated_cases.is_empty() {
+                for (ctor_id, arms_no) in duplicated_cases.into_iter().enumerate() {
+                    let ctor = regctx.datatype_info[&datatype.unwrap()].ctors[ctor_id];
+                    regctx.errors.push(TranslateErr::DuplicatedPatterns {expr: term_with_pos.clone(), ctor, arms_no})
+                }
+            }
+
+            let non_exhaustive_cases: Vec<_> = cases.iter()
+                .enumerate().filter(|(_, (case_body,_))| case_body.is_none()).map(|(i,_)| i).collect();
+            if !non_exhaustive_cases.is_empty() {
+                regctx.errors.push(TranslateErr::NonExhaustivePatterns {
+                    expr: term_with_pos,
+                    ctors: non_exhaustive_cases.clone(),
+                });
+            }
+
+            let hole = Rc::new(typechk::HoledTerm::Hole);
 
             Rc::new( core::HoledTerm::Case {
                 t: translate_term(t, regctx)?,
-                cases: cases.into_iter().collect::<Option<_>>()
-                    .ok_or(TranslateErr::NonExhaustivePatterns(term_with_pos))?,
+                cases: cases.into_iter().map(|(case_body,_)| case_body.unwrap_or(hole.clone())).collect(),
                 datatype,
             } )
         },
         ast::Term::If{..} => unimplemented!(),
         ast::Term::Lit(lit) => translate_literal(lit, regctx)?,
-        ast::Term::Hole => Rc::new( core::HoledTerm::Hole ),
+        ast::Term::Hole(i) => unimplemented!(), // Rc::new( core::HoledTerm::Hole ),
     } )
 }
 
@@ -186,7 +219,7 @@ fn translate_parametric_term<I>(term: ast::TermWithPos, mut params: I, regctx: &
 {
     let hole = Rc::new(typechk::HoledTerm::Hole);
     if let Some(param) = params.next() {
-        regctx.ac_push_temporary( param?, |regctx, name| Ok( Rc::new(typechk::HoledTerm::Lam(
+        regctx.ac_push_temporary( param?, |regctx, _name| Ok( Rc::new(typechk::HoledTerm::Lam(
             typechk::HoledAbs{A: hole.clone(), t: translate_parametric_term(term, params, regctx)?}
         )) ) )
     }
@@ -247,20 +280,30 @@ fn register_env(regctx: &mut RegisterCtx, ast_env: ast::Env) -> Result<(), Trans
     let ast::Env(statements) = ast_env;
     for statement in statements {
         match statement {
-            ast::Statement::Data{ident, T, ctors} => {
+            ast::Statement::Datatype{header, ctors} => {
+                /*
                 let name = coerce_name(ident)?;
                 let datatype_cid =
                     register_const(regctx, iter::empty(), name.clone(), UntranslatedConst::DataType{type_: T})?;
 
                 let m = core::modules::add_child(&regctx.scope.module(), name.clone());
 
-                for (ctor_id, ctor) in ctors.into_iter().enumerate() {
-                    let ctor_cid =
-                        register_const(regctx, iter::once(name.clone()), coerce_name(ctor.patn)?,
-                            UntranslatedConst::Ctor{datatype: datatype_cid, type_: ctor.T})?;
-                    
-                    regctx.ctor_info.insert(ctor_cid, CtorInfo{datatype: datatype_cid, ctor_id});
-                }
+                println!("{:?}", ctors);
+
+                let ctors_id: Vec<core::ConstId> =
+                    ctors.into_iter().enumerate().map( |(ctor_id, ctor)| {
+                        let ctor_cid =
+                            register_const(regctx, iter::once(name.clone()), coerce_name(ctor.patn)?,
+                                UntranslatedConst::Ctor{datatype: datatype_cid, type_: ctor.T})?;
+                        
+                        regctx.ctor_info.insert(ctor_cid, CtorInfo{datatype: datatype_cid, ctor_id});
+
+                        Ok( ctor_cid )
+                    } ).collect::<Result<_,TranslateErr>>()?;
+
+                regctx.datatype_info.insert(datatype_cid, DataTypeInfo{ctors: ctors_id});
+                */
+                unimplemented!()
             }
             ast::Statement::Def(lhs,rhs) => {
                 let (name, params) = unfold_app_chain(lhs.clone());
@@ -312,6 +355,8 @@ struct RegisterCtx {
     typings: Vec<UntranslatedTyping>,
     ac: AbsCtx,
     ctor_info: HashMap<core::ConstId, CtorInfo>,
+    datatype_info: HashMap<core::ConstId, DataTypeInfo>,
+    errors: Vec<TranslateErr>,
 }
 impl RegisterCtx {
     fn new(scope: core::modules::Scope) -> Self {
@@ -322,6 +367,8 @@ impl RegisterCtx {
             typings: Vec::new(),
             ac: AbsCtx::new(),
             ctor_info: HashMap::new(),
+            datatype_info: HashMap::new(),
+            errors: Vec::new(),
         }
     }
 
@@ -344,6 +391,10 @@ struct CtorInfo {
     datatype: core::ConstId,
     ctor_id: core::CtorId,
 }
+#[derive(Clone)]
+struct DataTypeInfo {
+    ctors: Vec<core::ConstId>,
+}
 
 #[derive(Clone)]
 enum UntranslatedConst {
@@ -358,6 +409,7 @@ struct UntranslatedTyping {
     type_: ast::TermWithPos,
 }
 
+#[derive(Clone, Debug)]
 pub enum TranslateErr {
     CantSpecifyNamespace(ast::Ident),
     InvalidDefLhs(ast::TermWithPos),
@@ -370,8 +422,9 @@ pub enum TranslateErr {
     ExpectedIdentOfCtor(ast::TermWithPos),
     ExpectedIdentAtArgsOfCtor(ast::TermWithPos),
     InvalidDataTypeParam(ast::TermWithPos),
-    MismatchDataType(ast::TermWithPos),
-    NonExhaustivePatterns(ast::TermWithPos),
+    MismatchDataType{expr: ast::TermWithPos, arms_no: Vec<usize>},
+    DuplicatedPatterns{expr: ast::TermWithPos, arms_no: Vec<usize>, ctor: core::ConstId},
+    NonExhaustivePatterns{expr: ast::TermWithPos, ctors: Vec<core::CtorId>},
 }
 impl From<CoerceNameErr> for TranslateErr {
     fn from(e: CoerceNameErr) -> Self {

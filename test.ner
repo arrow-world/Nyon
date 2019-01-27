@@ -1,60 +1,14 @@
-data Nat : Type where
-    Z : Nat;
-    S : Nat -> Nat
-;
+datatype nat
+    z | s : nat -> nat
 
-data Empty : Type where;
+add : nat -> nat -> nat
+add m n := case m of
+    nat.z => n
+    nat.s k => nat.s (add k n)
 
-not : Type -> Type;
-not p := p -> Empty;
+mul : nat -> nat -> nat
+mul m n := case m of
+    nat.z => nat z
+    nat.s k => add (mul k n) n
 
-infix = Equal;
-data Equal : a -> b -> Type where
-    Refl : Equal x x
-;
-
-data Unit : Type where
-    TT : Unit
-;
-
-add : Prod Nat Nat -> Nat;
-add [m,n] :=
-    case n of
-        Nat::Z => m;
-        Nat::S l => Nat::S (add m l)
-    ;
-;
-
-mul : Prod Nat Nat -> Nat;
-mul [m,n] :=
-    case n of
-        Nat::Z => Nat::Z;
-        Nat::S l => add (mul m n) l
-    ;
-;
-
-infix < LessThan;
-data LessThan : Nat -> Nat -> Type where
-    Z_LT_SN : LessThan Nat::Z (Nat::S n);
-    SM_LT_SN : LessThan m n -> LessThan (Nat::S m) (Nat::S n)
-;
-
-infix > GreaterThan;
-data GreaterThan : Nat -> Nat -> Type where
-    SN_GT_Z : GreaterThan (Nat::S n) Nat::Z;
-    SM_GT_SN : GreaterThan m n -> GreaterThan (Nat::S m) (Nat::S n)
-;
-
-op_sub : (m:Nat) -> (n:Nat) -> GreaterThan m n -> Nat;
-op_sub m n gt :=
-    case gt of
-        GreaterThan::SN_GT_Z n' => Nat::S n';
-        GreaterThan::SM_GT_SN m' n' gt' => op_sub m' n' gt'
-    ;
-;
-
-data Int : Type where
-    Pair : (m:Nat) -> (n:Nat) -> LessThan m n -> Int
-;
-
-int_two := Int::Pair 1 3 $ LessThan::SM_GT_SN $ LessThan::Z_LT_SN Nat::Z $ Nat::S (Nat::S Nat::Z);
+age_of_yjsnpi := mul 6 4

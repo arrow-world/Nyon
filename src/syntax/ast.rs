@@ -1,5 +1,4 @@
 use std::fmt;
-use std::rc::Rc;
 
 #[derive(Clone, Debug)]
 pub enum Term {
@@ -15,7 +14,7 @@ pub enum Term {
     Case{t: TermWithPos, arms: Vec<Arm>},
     If{p: TermWithPos, tv: TermWithPos, fv: TermWithPos},
     Lit(Lit),
-    Hole,
+    Hole(Option<Ident>),
 }
 impl fmt::Display for Term {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
@@ -23,12 +22,12 @@ impl fmt::Display for Term {
             Term::Ident(i) => write!(f, "{}", i),
             Term::Universe => write!(f, "type"),
             Term::App{f:_f,x} => write!(f, "({} {})", _f, x),
-            Term::Pi{x,A,B} => write!(f, "Π({}:{}){}", x, A, B),
+            Term::Pi{x,A,B} => write!(f, "(|{}:{}| {})", x, A, B),
             Term::Arrow{A,B} => write!(f, "({} -> {})", A, B),
             // Term::Infix(i) => write!(f, "({})", i),
             Term::Typing(ty) => write!(f, "({})", ty),
             Term::Let{env, body} => write!(f, "(let {} in {})", env, body),
-            Term::Lam{x,A,t} => write!(f, "(λ{}:{}.{})", x, A, t),
+            Term::Lam{x,A,t} => write!(f, "(\\{}:{}->{})", x, A, t),
             Term::Case{t, arms} => {
                 write!(f, "(case {} of ", t)?;
                 for i in 0..arms.len() {
@@ -39,7 +38,7 @@ impl fmt::Display for Term {
             },
             Term::If{p, tv, fv} => write!(f, "(if {} then {} else {})", p, tv, fv),
             Term::Lit(lit) => write!(f, "{}", lit),
-            Term::Hole => write!(f, "_"),
+            Term::Hole(i) => write!(f, "?{}", if let Some(i) = i { format!("{}", i) } else { "".into() }),
         }
     }
 }
@@ -157,7 +156,7 @@ pub struct Module {
 
 #[derive(Clone, Debug)]
 pub enum Statement {
-    Data{ident: Ident, T: TermWithPos, ctors: Vec<Ctor>},
+    Datatype{header: TermWithPos, ctors: Vec<TermWithPos>},
     // DefInfix{op: Op, name: Ident},
     // InfixPrio{head: Ident, tail: Vec<Ident>},
     Def(TermWithPos, TermWithPos),
@@ -166,14 +165,14 @@ pub enum Statement {
 impl fmt::Display for Statement {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            Statement::Data{ident, T, ctors} => {
-                write!(f, "data {} : {} where (", ident, T)?;
+            Statement::Datatype{header, ctors} => {
+                write!(f, "datatype {} {{", header)?;
                 for i in 0..ctors.len() {
                     let ref ctor = ctors[i];
-                    write!(f, "{} : {}", ctor.patn, ctor.T)?;
-                    if i < ctors.len()-1 { write!(f, "; ")?; }
+                    write!(f, "{}", ctor)?;
+                    if i < ctors.len()-1 { write!(f, " | ")?; }
                 }
-                write!(f, ")")
+                write!(f, "}}")
             },
             // Statement::DefInfix{op: Op(op), name} => write!(f, "infix {} {}", op, name),
             /* Statement::InfixPrio{head, tail} => {
@@ -185,10 +184,4 @@ impl fmt::Display for Statement {
             Statement::Typing(Typing{x,T}) => write!(f, "{} : {}", x, T),
         }
     }
-}
-
-#[derive(Clone, Debug)]
-pub struct Ctor {
-    pub patn: Ident,
-    pub T: TermWithPos,
 }

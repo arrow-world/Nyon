@@ -1,5 +1,5 @@
 mod modules;
-mod translator;
+pub mod translator;
 mod typechk;
 
 pub use self::typechk::HoledTerm;
@@ -8,11 +8,12 @@ use std::rc::Rc;
 
 pub type ConstId = usize;
 pub type CtorId = usize;
+pub type HoleId = usize;
 
 #[derive(Clone, Debug)]
 pub struct Env {
-    pub consts: Vec<typechk::HoledConst>,
-    pub typings: Vec<(Rc<HoledTerm>, Rc<HoledTerm>)>,
+    pub consts: Vec<Option<typechk::HoledConst>>,
+    pub typings: Vec<Option<(Rc<HoledTerm>, Rc<HoledTerm>)>>,
 }
 impl Env {
     pub fn extend(&mut self, other: Env) {
@@ -31,8 +32,8 @@ impl Env {
 impl From<Env> for typechk::HoledEnv {
     fn from(env: Env) -> Self {
         typechk::HoledEnv {
-            consts: env.consts,
-            typings: env.typings,
+            consts: env.consts.into_iter().map(|c| c.unwrap()).collect(),
+            typings: env.typings.into_iter().map(|t| t.unwrap()).collect(),
         }
     }
 }

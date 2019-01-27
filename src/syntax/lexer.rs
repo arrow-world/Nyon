@@ -1,6 +1,8 @@
 use combine::*;
 use combine::parser::char::*;
-use combine::stream::state::SourcePosition;
+use combine::stream::state::{SourcePosition, State};
+
+use std::collections::VecDeque;
 
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
 pub enum Token {
@@ -9,9 +11,7 @@ pub enum Token {
     Sep(Sep),
     Op(Op),
     Lit(Lit),
-}
-impl From<TokenWithPos> for Token {
-    fn from(x: TokenWithPos) -> Token { x.token }
+    Indent{lvl: usize},
 }
 
 #[derive(Clone, PartialEq, Eq, Debug)]
@@ -31,7 +31,7 @@ pub enum Keyword {
     If,
     Then,
     Else,
-    Data,
+    Datatype,
     Where,
     Infix,
     InfixPrio,
@@ -47,24 +47,22 @@ pub enum Sep {
     CloseBrace,
     Dollar,
     Comma,
-    Line(LineSep),
-}
-
-#[derive(Clone, PartialEq, Eq, Hash, Debug)]
-pub enum LineSep {
-    NewLine,
+    LineComment,
+    OpenCommentParen,
+    CloseCommentParen,
     Semicolon,
 }
 
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
 pub enum Op {
     Arrow,
-    Lambda,
+    Backslash,
     Typing,
-    Domain,
-    Hole,
     Def,
     Matcher,
+    VertialBar,
+    Dot,
+    Question,
     UserDef(String),
 }
 
@@ -75,16 +73,23 @@ pub enum Lit {
     Str(String),
 }
 
-pub fn top_level<I>() -> impl Parser<Input = I, Output = Vec<TokenWithPos>>
+pub fn lex_src(src: &str) -> Result<Vec<TokenWithPos>, easy::Errors<char, &str, SourcePosition>> {
+    top_level().skip(eof()).easy_parse(State::new(src)).map(|x| x.0)
+}
+
+fn top_level<I>() -> impl Parser<Input = I, Output = Vec<TokenWithPos>>
     where I: Stream<Item = char, Position = SourcePosition>,
           I::Error: ParseError<I::Item, I::Range, I::Position>,
 {
-    let token_sep = || many::<(),_>(not_followed_by(newline()).skip(space()));
-    let comment = || attempt( string("#").skip(many::<(),_>(not_followed_by(newline()).skip(any()))).skip(newline()) )
-        .or(attempt( string("(*").skip(many::<(),_>(not_followed_by(string("*)")))).skip(string("*)")) ))
-        .with(value(()));
+    use std::iter;    
 
-    token_sep().with(many(lex().skip(attempt(token_sep()).or(comment()))))
+    let token_sep = || many::<(),_>(not_followed_by(newline()).skip(space()));
+    let line = || many(lex().skip( attempt(token_sep()) )).skip(token_sep());
+    let indent = || (position(), many::<Vec<_>,_>( tab().or(token(' ')).with(value(())) ), position())
+        .map(|(start, indent, end)| TokenWithPos{ start, end, token: Token::Indent{lvl: indent.len()} });
+
+    sep_end_by((indent(), line()), attempt(newline()))
+        .map(|lines: Vec<(_,Vec<_>)>| lines.into_iter().map(|(i,l)| iter::once(i).chain(l)).flatten().collect())
 }
 
 fn lex<I>() -> impl Parser<Input = I, Output = TokenWithPos>
@@ -95,7 +100,7 @@ fn lex<I>() -> impl Parser<Input = I, Output = TokenWithPos>
     let op_char = || satisfy(|c:char| c.is_punctuation_other() || c.is_symbol_math());
 
     let kw = || choice((
-        attempt( string("data").map(|_| Keyword::Data) ),
+        attempt( string("datatype").map(|_| Keyword::Datatype) ),
         attempt( string("where").map(|_| Keyword::Where) ),
         attempt( string("infix_prio").map(|_| Keyword::InfixPrio) ),
         attempt( string("infix").map(|_| Keyword::Infix) ),
@@ -118,17 +123,18 @@ fn lex<I>() -> impl Parser<Input = I, Output = TokenWithPos>
         token('}').map(|_| Sep::CloseBrace),
         token('$').map(|_| Sep::Dollar),
         token(',').map(|_| Sep::Comma),
-        token(';').map(|_| Sep::Line(LineSep::Semicolon)),
-    )).or( newline().map(|_| Sep::Line(LineSep::NewLine)) );
+        token(';').map(|_| Sep::Semicolon),
+    ));
 
     let op = || attempt( choice((
         attempt( string("->").map(|_| Op::Arrow) ),
         attempt( string(":=").map(|_| Op::Def) ),
-        attempt( string("::").map(|_| Op::Domain) ),
         attempt( string("=>").map(|_| Op::Matcher) ),
         token(':').map(|_| Op::Typing),
-        token('_').map(|_| Op::Hole),
-        token('\\').map(|_| Op::Lambda),
+        token('\\').map(|_| Op::Backslash),
+        token('|').map(|_| Op::VertialBar),
+        token('.').map(|_| Op::Dot),
+        token('?').map(|_| Op::Question),
     )).skip(not_followed_by(op_char())) )
         .or(many1::<String,_>(op_char()).map(|s| Op::UserDef(s)));
 
@@ -202,4 +208,27 @@ fn str<I>() -> impl Parser<Input = I, Output = String>
             }
         )
     }) )).skip(token('"'))
+}
+
+fn comment<I>() -> impl Parser<Input = I, Output = ()>
+    where I: Stream<Item = char, Position = SourcePosition>,
+          I::Error: ParseError<I::Item, I::Range, I::Position>,
+{
+    attempt( string("#").skip(many::<(),_>(not_followed_by(newline()).skip(any()))).skip(newline()) ).with(value(()))
+        .or( attempt( paren_comment() ) )
+}
+
+fn paren_comment_<I>() -> impl Parser<Input = I, Output = ()>
+    where I: Stream<Item = char, Position = SourcePosition>,
+          I::Error: ParseError<I::Item, I::Range, I::Position>,
+{
+    string("(*").with(many::<(),_>(not_followed_by(string("*)")).with(
+        paren_comment().or(any().with(value(())))
+    ))).skip(string("*)"))
+}
+
+parser! {
+    pub fn paren_comment[I]()(I) -> () where [I: Stream<Item = char, Position = SourcePosition>] {
+        paren_comment_()
+    }
 }

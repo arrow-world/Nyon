@@ -4,7 +4,7 @@ use std::collections::HashMap;
 use std::rc::{Rc, Weak};
 use std::cell::RefCell;
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct Scope {
     module: Rc<RefCell<Module>>,
     names: Vec<Name>,
@@ -62,7 +62,7 @@ impl Scope {
     pub fn names(&self) -> &[Name] { &self.names }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct Name {
     pub qualifier: Vec<String>,
     pub identifier: String,
