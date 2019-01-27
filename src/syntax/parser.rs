@@ -144,7 +144,7 @@ fn term<I>(indent_lvl: i64) -> impl Parser<Input = I, Output = ast::TermWithPos>
             token(lexer::Token::Sep(lexer::Sep::Dollar)).skip(lfs())
             .with(expr(indent_lvl))
             .skip(look_ahead( indent().with(value(()))
-                .or(token(lexer::Token::Sep(lexer::Sep::Semicolon)).with(value(()))) ))
+                .or(token(lexer::Token::Sep(lexer::Sep::Comma)).with(value(()))) ))
         ),
     ))
 }
@@ -210,7 +210,7 @@ fn expr_primary<I>(indent_lvl: i64) -> impl Parser<Input = I, Output = ast::Term
                 expr(inner_indent_lvl).skip(lfs()).skip(token(lexer::Token::Op(lexer::Op::Matcher))).skip(lfs())
                     .and(expr(inner_indent_lvl)).map(|(patn, t)| ast::Arm{patn,t}),
             indent_lvl,
-            lexer::Token::Sep(lexer::Sep::Semicolon),
+            lexer::Token::Sep(lexer::Sep::Comma),
         ) )
         .map(|(t, arms)| ast::Term::Case{t, arms});
     
