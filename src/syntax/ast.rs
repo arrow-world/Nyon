@@ -169,8 +169,8 @@ impl fmt::Display for Statement {
                 write!(f, "datatype {} {{", header)?;
                 for i in 0..ctors.len() {
                     let ref ctor = ctors[i];
-                    write!(f, "{}", ctor)?;
-                    if i < ctors.len()-1 { write!(f, " | ")?; }
+                    write!(f, " {} ", ctor)?;
+                    if i < ctors.len()-1 { write!(f, "|")?; }
                 }
                 write!(f, "}}")
             },
