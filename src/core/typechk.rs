@@ -1,4 +1,4 @@
-use super::ConstId;
+use super::{ConstId, HoleId};
 
 use std::rc::Rc;
 
@@ -12,7 +12,7 @@ pub enum HoledTerm {
     Pi(HoledAbs),
     Let{env: HoledEnv, t: Rc<HoledTerm>},
     Case{t: Rc<HoledTerm>, cases: Vec<Rc<HoledTerm>>, datatype: Option<ConstId>},
-    Hole,
+    Hole(Option<HoleId>),
     Value(Value),
 }
 
@@ -140,11 +140,15 @@ fn assign_term(term: Rc<HoledTerm>, infertype_id: &mut u64) -> InferTypedTerm {
                     datatype: *datatype,
                 },
             HoledTerm::Value(ref val) => InferTerm::Value(val.clone()),
-            HoledTerm::Hole => {
-                let it = InferTerm::Infer{id: *infertype_id};
-                *infertype_id += 1;
-                it
-            },
+            HoledTerm::Hole(ref hole_id) =>
+                if let Some(hole_id) = *hole_id {
+                    InferTerm::Hole(hole_id)
+                }
+                else {
+                    let it = InferTerm::Infer{id: *infertype_id};
+                    *infertype_id += 1;
+                    it
+                },
         } ),
         type_: Rc::new(InferTerm::Infer{id: *infertype_id}),
     };
@@ -172,6 +176,7 @@ pub enum InferTerm {
     Case{t: InferTypedTerm, cases: Vec<InferTypedTerm>, datatype: Option<ConstId>},
     Value(Value),
     Infer{id: u64},
+    Hole(HoleId),
 }
 
 #[derive(Clone, Debug)]
@@ -216,7 +221,7 @@ pub struct InferTypedTerm {
  * Note that these types need to be normalized enough.
  */
 pub fn unify(a: Rc<HoledTerm>, b: Rc<HoledTerm>, ctx: &Ctx) -> Result<Rc<HoledTerm>, UnifyErr> {
-    if let HoledTerm::Hole = *b { return unify(b, a, ctx); }
+    if let HoledTerm::Hole(..) = *b { return unify(b, a, ctx); }
 
     match *a.clone() {
         HoledTerm::Const(id_a) => match *b {

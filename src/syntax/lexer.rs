@@ -2,8 +2,6 @@ use combine::*;
 use combine::parser::char::*;
 use combine::stream::state::{SourcePosition, State};
 
-use std::collections::VecDeque;
-
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
 pub enum Token {
     Ident(String),

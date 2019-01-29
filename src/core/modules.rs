@@ -8,6 +8,7 @@ use std::cell::RefCell;
 pub struct Scope {
     module: Rc<RefCell<Module>>,
     names: Vec<Name>,
+    holes: Vec<String>,
     parent: Option< Rc<Scope> >,
     base_cid: ConstId,
 }
@@ -16,6 +17,7 @@ impl Scope {
         Scope {
             module: Rc::new(RefCell::new(Module::anonymous_top())),
             names: Vec::new(),
+            holes: Vec::new(),
             parent: None,
             base_cid: 0,
         }
@@ -25,6 +27,7 @@ impl Scope {
         Scope {
             module,
             names: Vec::new(),
+            holes: Vec::new(),
             base_cid: parent.base_cid + parent.names.len(),
             parent: Some(parent),
         }

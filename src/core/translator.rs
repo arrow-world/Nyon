@@ -154,7 +154,7 @@ fn translate_term(term: ast::TermWithPos, regctx: &mut RegisterCtx) -> Result<Rc
                 });
             }
 
-            let hole = Rc::new(typechk::HoledTerm::Hole);
+            let hole = Rc::new(typechk::HoledTerm::Hole(None));
 
             Rc::new( core::HoledTerm::Case {
                 t: translate_term(t, regctx)?,
@@ -164,7 +164,11 @@ fn translate_term(term: ast::TermWithPos, regctx: &mut RegisterCtx) -> Result<Rc
         },
         ast::Term::If{..} => unimplemented!(),
         ast::Term::Lit(lit) => translate_literal(lit, regctx)?,
-        ast::Term::Hole(i) => unimplemented!(), // Rc::new( core::HoledTerm::Hole ),
+        ast::Term::Hole(i) =>
+            if let Some(i) = i {
+
+            }
+            else { Rc::new(typechk::HoledTerm::Hole(None)) }
     } )
 }
 
@@ -217,7 +221,7 @@ fn translate_parametric_term<I>(term: ast::TermWithPos, mut params: I, regctx: &
     -> Result<Rc<typechk::HoledTerm>, TranslateErr>
     where I: Iterator<Item = Result<ast::Ident, TranslateErr>>
 {
-    let hole = Rc::new(typechk::HoledTerm::Hole);
+    let hole = Rc::new(typechk::HoledTerm::Hole(None));
     if let Some(param) = params.next() {
         regctx.ac_push_temporary( param?, |regctx, _name| Ok( Rc::new(typechk::HoledTerm::Lam(
             typechk::HoledAbs{A: hole.clone(), t: translate_parametric_term(term, params, regctx)?}
