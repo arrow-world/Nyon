@@ -59,6 +59,8 @@ impl Scope {
         Some(cid)
     }
 
+
+
     pub fn base_cid(&self) -> ConstId { self.base_cid }
     pub fn next_cid(&self) -> ConstId { self.base_cid + self.names.len() }
 

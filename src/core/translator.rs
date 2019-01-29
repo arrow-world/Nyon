@@ -166,7 +166,7 @@ fn translate_term(term: ast::TermWithPos, regctx: &mut RegisterCtx) -> Result<Rc
         ast::Term::Lit(lit) => translate_literal(lit, regctx)?,
         ast::Term::Hole(i) =>
             if let Some(i) = i {
-
+                regctx.scope
             }
             else { Rc::new(typechk::HoledTerm::Hole(None)) }
     } )
@@ -285,7 +285,6 @@ fn register_env(regctx: &mut RegisterCtx, ast_env: ast::Env) -> Result<(), Trans
     for statement in statements {
         match statement {
             ast::Statement::Datatype{header, ctors} => {
-                /*
                 let name = coerce_name(ident)?;
                 let datatype_cid =
                     register_const(regctx, iter::empty(), name.clone(), UntranslatedConst::DataType{type_: T})?;
@@ -306,8 +305,6 @@ fn register_env(regctx: &mut RegisterCtx, ast_env: ast::Env) -> Result<(), Trans
                     } ).collect::<Result<_,TranslateErr>>()?;
 
                 regctx.datatype_info.insert(datatype_cid, DataTypeInfo{ctors: ctors_id});
-                */
-                unimplemented!()
             }
             ast::Statement::Def(lhs,rhs) => {
                 let (name, params) = unfold_app_chain(lhs.clone());
