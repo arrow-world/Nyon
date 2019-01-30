@@ -166,7 +166,7 @@ fn translate_term(term: ast::TermWithPos, regctx: &mut RegisterCtx) -> Result<Rc
         ast::Term::Lit(lit) => translate_literal(lit, regctx)?,
         ast::Term::Hole(i) =>
             if let Some(i) = i {
-                regctx.scope
+                unimplemented!()
             }
             else { Rc::new(typechk::HoledTerm::Hole(None)) }
     } )
@@ -285,7 +285,8 @@ fn register_env(regctx: &mut RegisterCtx, ast_env: ast::Env) -> Result<(), Trans
     for statement in statements {
         match statement {
             ast::Statement::Datatype{header, ctors} => {
-                let name = coerce_name(ident)?;
+                let (name, params) = coerce_name_with_params(header)?;
+
                 let datatype_cid =
                     register_const(regctx, iter::empty(), name.clone(), UntranslatedConst::DataType{type_: T})?;
 
@@ -347,6 +348,24 @@ fn register_const<Q: IntoIterator<Item=String> + Clone>(
     Ok(cid)
 }
 
+fn coerce_name_with_params(term: ast::TermWithPos) -> Result<(String, Vec<String>), TranslateErr> {
+    let (name, params) = unfold_app_chain(term.clone());
+
+    if let ast::Term::Ident(ident) = *name.term {
+        let mut param_names = Vec::with_capacity(params.len());
+        for param in params {
+            if let ast::Term::Ident(i) = *param.term {
+                param_names.push(coerce_name(i)?);
+            }
+            else { return Err(TranslateErr::ExpectedNameWithParams(param)); }
+        }
+        
+        Ok((ident, param_names))
+    }
+    else {
+        Err(TranslateErr::ExpectedIdent(term))
+    }
+}
 
 #[derive(Clone)]
 struct RegisterCtx {
@@ -400,7 +419,7 @@ struct DataTypeInfo {
 #[derive(Clone)]
 enum UntranslatedConst {
     Def{param_names: Vec<ast::Ident>, rhs: ast::TermWithPos},
-    DataType{type_: ast::TermWithPos},
+    DataType{param_names: Vec<ast::Ident>},
     Ctor{datatype: core::ConstId, type_: ast::TermWithPos},
 }
 
@@ -426,6 +445,7 @@ pub enum TranslateErr {
     MismatchDataType{expr: ast::TermWithPos, arms_no: Vec<usize>},
     DuplicatedPatterns{expr: ast::TermWithPos, arms_no: Vec<usize>, ctor: core::ConstId},
     NonExhaustivePatterns{expr: ast::TermWithPos, ctors: Vec<core::CtorId>},
+    ExpectedNameWithParams(ast::TermWithPos),
 }
 impl From<CoerceNameErr> for TranslateErr {
     fn from(e: CoerceNameErr) -> Self {
