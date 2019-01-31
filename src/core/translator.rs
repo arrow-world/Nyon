@@ -42,23 +42,17 @@ fn translate_all(regctx: &mut RegisterCtx) -> Result<(), TranslateErr> {
 fn translate_const(c: UntranslatedConst, regctx: &mut RegisterCtx) -> Result<typechk::HoledConst, TranslateErr> {
     Ok( match c {
         UntranslatedConst::Def{param_names, rhs} => typechk::HoledConst::Def(
-            translate_parametric_term(rhs, param_names.into_iter().map(|x| Ok(x)), regctx)?
+            translate_parametric_term(rhs, param_names.into_iter(), regctx, |abs| typechk::HoledTerm::Lam(abs))?
         ),
-        UntranslatedConst::DataType{type_} => {
-            let (param_types, universe) = unfold_arrow_chain(type_);
+        UntranslatedConst::DataType{param_names} => {
             typechk::HoledConst::DataType {
-                param_types: param_types.into_iter().
-                    map(|param| translate_term(param, regctx)).collect::<Result<_,_>>()?,
-                universe: translate_term(universe, regctx)?,
+                param_types: vec![Rc::new(typechk::HoledTerm::Hole(None)); param_names.len()],
             }
         },
         UntranslatedConst::Ctor{datatype, type_} => {
-            let (param_types, ret_type) = unfold_arrow_chain(type_);
-            typechk::HoledConst::Ctor {
-                datatype,
-                param_types: param_types.into_iter()
-                    .map(|param| translate_term(param, regctx)).collect::<Result<_,_>>()?,
-                ret_type: translate_term(ret_type, regctx)?,
+            let param_names = regctx.datatype_info[&datatype].params.clone();
+            typechk::HoledConst::Ctor { datatype, type_:
+                translate_parametric_term(type_, param_names.into_iter(), regctx, |abs| typechk::HoledTerm::Pi(abs))?
             }
         },
     } )
@@ -79,8 +73,8 @@ fn translate_term(term: ast::TermWithPos, regctx: &mut RegisterCtx) -> Result<Rc
             s: translate_term(f, regctx)?,
             t: translate_term(x, regctx)?,
         } ),
-        ast::Term::Lam{x, A, t} => Rc::new( core::HoledTerm::Lam(translate_abs(x, A, t, regctx)?) ),
-        ast::Term::Pi{x, A, B} => Rc::new( core::HoledTerm::Pi(translate_abs(x, A, B, regctx)?) ),
+        ast::Term::Lam{x, A, t} => Rc::new( core::HoledTerm::Lam(translate_abs(coerce_name(x)?, A, t, regctx)?) ),
+        ast::Term::Pi{x, A, B} => Rc::new( core::HoledTerm::Pi(translate_abs(coerce_name(x)?, A, B, regctx)?) ),
         ast::Term::Arrow{A, B} => Rc::new( core::HoledTerm::Pi( core::typechk::HoledAbs {
             A: translate_term(A, regctx)?,
             t: translate_term(B, regctx)?,
@@ -186,18 +180,15 @@ fn translate_arm(arm: ast::Arm, regctx: &mut RegisterCtx)
 {
     let (ctor, args) = unfold_app_chain(arm.patn);
 
-    // Note that it doesn't check here if the first of application chain of the pattern is a datatype constructor.
-    // That will be checked in Type Checking stage.
-    // It just checks here if the first of application chain of the pattern is a identifier.
     if let ast::Term::Ident(ident) = *ctor.term {
         if let Some(ctor_id) = regctx.scope.resolve_from_ident(&ident) {
             let args = args.into_iter().map( |arg| {
-                if let ast::Term::Ident(ident) = *arg.term { Ok(ident) }
+                if let ast::Term::Ident(ident) = *arg.term { Ok(coerce_name(ident)?) }
                 else { Err(TranslateErr::ExpectedIdentAtArgsOfCtor(arg)) }
-            } );
+            } ).collect::<Result<Vec<_>,_>>()?;
 
             let rhs = arm.t;
-            let t = translate_parametric_term(rhs, args, regctx)?;
+            let t = translate_parametric_term(rhs, args.into_iter(), regctx, |abs| typechk::HoledTerm::Lam(abs))?;
 
             Ok(( ctor_id, t ))
         }
@@ -206,7 +197,7 @@ fn translate_arm(arm: ast::Arm, regctx: &mut RegisterCtx)
     else { Err(TranslateErr::ExpectedIdent(ctor)) }
 }
 
-fn translate_abs(x: ast::Ident, A: ast::TermWithPos, t: ast::TermWithPos, regctx: &mut RegisterCtx)
+fn translate_abs(x: String, A: ast::TermWithPos, t: ast::TermWithPos, regctx: &mut RegisterCtx)
     -> Result<typechk::HoledAbs, TranslateErr>
 {
     regctx.ac_push_temporary( x, |regctx, _| {
@@ -217,17 +208,26 @@ fn translate_abs(x: ast::Ident, A: ast::TermWithPos, t: ast::TermWithPos, regctx
     } )
 }
 
-fn translate_parametric_term<I>(term: ast::TermWithPos, mut params: I, regctx: &mut RegisterCtx)
+fn translate_parametric_term<I, F>(term: ast::TermWithPos, mut params: I, regctx: &mut RegisterCtx, abs_term: F)
     -> Result<Rc<typechk::HoledTerm>, TranslateErr>
-    where I: Iterator<Item = Result<ast::Ident, TranslateErr>>
+    where I: DoubleEndedIterator<Item = String>,
+          F: Fn(typechk::HoledAbs) -> typechk::HoledTerm + Clone,
 {
-    let hole = Rc::new(typechk::HoledTerm::Hole(None));
-    if let Some(param) = params.next() {
-        regctx.ac_push_temporary( param?, |regctx, _name| Ok( Rc::new(typechk::HoledTerm::Lam(
-            typechk::HoledAbs{A: hole.clone(), t: translate_parametric_term(term, params, regctx)?}
-        )) ) )
+    fn translate_rest<I,F>(term: ast::TermWithPos, mut params: I, regctx: &mut RegisterCtx, abs_term: F)
+        -> Result<Rc<typechk::HoledTerm>, TranslateErr>
+        where I: Iterator<Item = String>,
+            F: Fn(typechk::HoledAbs) -> typechk::HoledTerm + Clone,
+    {
+        let hole = Rc::new(typechk::HoledTerm::Hole(None));
+        if let Some(param) = params.next() {
+            regctx.ac_push_temporary( param, |regctx, _name| Ok( Rc::new(abs_term.clone()(
+                typechk::HoledAbs{A: hole.clone(), t: translate_rest(term, params, regctx, abs_term)?}
+            )) ) )
+        }
+        else { translate_term(term, regctx) }
     }
-    else { translate_term(term, regctx) }
+
+    translate_rest(term, params.rev(), regctx, abs_term)
 }
 
 #[derive(Clone)]
@@ -238,7 +238,7 @@ impl AbsCtx {
     fn new() -> Self { AbsCtx{vars: Vec::new()} }
 
     fn dbi(&self, ident: &str) -> Option<u64> {
-        self.vars.iter().position(|var| var == ident).map(|i| (self.vars.len() - i) as u64)
+        self.vars.iter().position(|var| var == ident).map(|i| (self.vars.len() - i - 1) as u64)
     }
 }
 
@@ -285,44 +285,36 @@ fn register_env(regctx: &mut RegisterCtx, ast_env: ast::Env) -> Result<(), Trans
     for statement in statements {
         match statement {
             ast::Statement::Datatype{header, ctors} => {
-                let (name, params) = coerce_name_with_params(header)?;
+                let (name, param_names) = coerce_name_with_params(header)?;
 
                 let datatype_cid =
-                    register_const(regctx, iter::empty(), name.clone(), UntranslatedConst::DataType{type_: T})?;
+                    register_const( regctx, iter::empty(), name.clone(),
+                        UntranslatedConst::DataType{param_names: param_names.clone()} )?;
 
-                let m = core::modules::add_child(&regctx.scope.module(), name.clone());
-
-                println!("{:?}", ctors);
+                core::modules::add_child(&regctx.scope.module(), name.clone());
 
                 let ctors_id: Vec<core::ConstId> =
                     ctors.into_iter().enumerate().map( |(ctor_id, ctor)| {
+                        let (ctor_name, ctor_type) =
+                            if let ast::Term::Typing(typing) = *ctor.term {
+                                (coerce_ident(typing.x).and_then(|i| coerce_name(i).map_err(|e| e.into())), typing.T)
+                            }
+                            else { return Err(TranslateErr::ExpectedTyping(ctor)); };
+
                         let ctor_cid =
-                            register_const(regctx, iter::once(name.clone()), coerce_name(ctor.patn)?,
-                                UntranslatedConst::Ctor{datatype: datatype_cid, type_: ctor.T})?;
+                            register_const(regctx, iter::once(name.clone()), ctor_name?,
+                                UntranslatedConst::Ctor{datatype: datatype_cid, type_: ctor_type})?;
                         
                         regctx.ctor_info.insert(ctor_cid, CtorInfo{datatype: datatype_cid, ctor_id});
 
                         Ok( ctor_cid )
                     } ).collect::<Result<_,TranslateErr>>()?;
 
-                regctx.datatype_info.insert(datatype_cid, DataTypeInfo{ctors: ctors_id});
+                regctx.datatype_info.insert(datatype_cid, DataTypeInfo{ctors: ctors_id, params: param_names});
             }
             ast::Statement::Def(lhs,rhs) => {
-                let (name, params) = unfold_app_chain(lhs.clone());
-
-                if let ast::Term::Ident(i) = *name.term {
-                    let mut param_names = Vec::with_capacity(params.len());
-                    for param in params {
-                        if let ast::Term::Ident(i) = *param.term {
-                            param_names.push(i);
-                        }
-                        else { return Err(TranslateErr::InvalidDefLhsParam(param)); }
-                    }
-
-                    register_const( regctx, iter::empty(), coerce_name(i)?,
-                        UntranslatedConst::Def{param_names, rhs} )?;
-                }
-                else { return Err(TranslateErr::InvalidDefLhs(lhs)); }
+                let (name, param_names) = coerce_name_with_params(lhs)?;
+                register_const( regctx, iter::empty(), name, UntranslatedConst::Def{param_names, rhs} )?;
             }
             ast::Statement::Typing(ast::Typing{x,T}) =>
                 regctx.typings.push(UntranslatedTyping{typed: x, type_: T}),
@@ -352,19 +344,16 @@ fn coerce_name_with_params(term: ast::TermWithPos) -> Result<(String, Vec<String
     let (name, params) = unfold_app_chain(term.clone());
 
     if let ast::Term::Ident(ident) = *name.term {
-        let mut param_names = Vec::with_capacity(params.len());
-        for param in params {
-            if let ast::Term::Ident(i) = *param.term {
-                param_names.push(coerce_name(i)?);
-            }
-            else { return Err(TranslateErr::ExpectedNameWithParams(param)); }
-        }
-        
-        Ok((ident, param_names))
+        params.into_iter().map( |param| coerce_ident(param).and_then(|i| coerce_name(i).map_err( |e| e.into() )) )
+            .collect::<Result<_,_>>()
+            .and_then( |param_names| Ok((coerce_name(ident)?, param_names)) )
     }
-    else {
-        Err(TranslateErr::ExpectedIdent(term))
-    }
+    else { Err(TranslateErr::ExpectedIdent(term)) }
+}
+
+fn coerce_ident(term: ast::TermWithPos) -> Result<ast::Ident, TranslateErr> {
+    if let ast::Term::Ident(i) = *term.term { Ok(i) }
+    else { Err(TranslateErr::ExpectedIdent(term)) }
 }
 
 #[derive(Clone)]
@@ -392,16 +381,20 @@ impl RegisterCtx {
         }
     }
 
-    fn ac_push_temporary<F, B>(&mut self, ident: ast::Ident, f: F) -> Result<B, TranslateErr>
+    fn ac_push_temporary<F, B>(&mut self, name: String, f: F) -> Result<B, TranslateErr>
         where F: FnOnce(&mut Self, String) -> Result<B, TranslateErr>,
     {
-        let name = coerce_name(ident.clone())?;
-        if self.ac.vars.iter().any(|var| *var == name) { return Err(TranslateErr::ConflictedVar(ident)); }
+        if self.ac.vars.iter().any(|var| *var == name) { return Err(TranslateErr::ConflictedVar(name)); }
         self.ac.vars.push(name.clone());
+
+        let name_for_debug = name.clone();
+        println!("pushed {}. {:?}", &name_for_debug, &self.ac.vars);
 
         let b = f(self, name);
 
         self.ac.vars.pop();
+
+        println!("poped {}.", &name_for_debug);
 
         b
     }
@@ -414,12 +407,13 @@ struct CtorInfo {
 #[derive(Clone)]
 struct DataTypeInfo {
     ctors: Vec<core::ConstId>,
+    params: Vec<String>,
 }
 
 #[derive(Clone)]
 enum UntranslatedConst {
-    Def{param_names: Vec<ast::Ident>, rhs: ast::TermWithPos},
-    DataType{param_names: Vec<ast::Ident>},
+    Def{param_names: Vec<String>, rhs: ast::TermWithPos},
+    DataType{param_names: Vec<String>},
     Ctor{datatype: core::ConstId, type_: ast::TermWithPos},
 }
 
@@ -437,15 +431,15 @@ pub enum TranslateErr {
     UndefinedIdent(ast::Ident),
     UndefinedModule(ast::Ident),
     AmbiguousIdent(ast::Ident),
-    ConflictedVar(ast::Ident),
+    ConflictedVar(String),
     ExpectedIdent(ast::TermWithPos),
     ExpectedIdentOfCtor(ast::TermWithPos),
     ExpectedIdentAtArgsOfCtor(ast::TermWithPos),
+    ExpectedTyping(ast::TermWithPos),
     InvalidDataTypeParam(ast::TermWithPos),
     MismatchDataType{expr: ast::TermWithPos, arms_no: Vec<usize>},
     DuplicatedPatterns{expr: ast::TermWithPos, arms_no: Vec<usize>, ctor: core::ConstId},
     NonExhaustivePatterns{expr: ast::TermWithPos, ctors: Vec<core::CtorId>},
-    ExpectedNameWithParams(ast::TermWithPos),
 }
 impl From<CoerceNameErr> for TranslateErr {
     fn from(e: CoerceNameErr) -> Self {

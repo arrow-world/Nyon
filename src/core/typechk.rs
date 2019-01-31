@@ -31,8 +31,8 @@ pub struct HoledEnv {
 #[derive(Clone, Debug)]
 pub enum HoledConst {
     Def(Rc<HoledTerm>),
-    DataType{param_types: Vec<Rc<HoledTerm>>, universe: Rc<HoledTerm>},
-    Ctor{datatype: ConstId, param_types: Vec<Rc<HoledTerm>>, ret_type: Rc<HoledTerm>},
+    DataType{param_types: Vec<Rc<HoledTerm>>},
+    Ctor{datatype: ConstId, type_: Rc<HoledTerm>},
 }
 
 /* #[derive(Clone, Debug)]

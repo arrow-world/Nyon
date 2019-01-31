@@ -1,5 +1,5 @@
 datatype nat
-    z | s : nat -> nat
+    z : nat | s : nat -> nat
 
 add : nat -> nat -> nat
 add m n := case m of
@@ -8,7 +8,7 @@ add m n := case m of
 
 mul : nat -> nat -> nat
 mul m n := case m of
-    nat.z => nat z
+    nat.z => nat.z
     nat.s k => add (mul k n) n
 
 age_of_yjsnpi := mul 6 4

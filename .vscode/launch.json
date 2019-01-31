@@ -4,16 +4,17 @@
     // 詳細情報は次を確認してください: https://go.microsoft.com/fwlink/?linkid=830387
     "version": "0.2.0",
     "configurations": [
+        
         {
             "type": "lldb",
             "request": "launch",
-            "name": "Debug unit tests in library 'lassy'",
+            "name": "Debug unit tests in library 'diyusi'",
             "cargo": {
                 "args": [
                     "test",
                     "--no-run",
                     "--lib",
-                    "--package=lassy"
+                    "--package=diyusi"
                 ],
                 "filter": {
                     "kind": "lib"
@@ -25,12 +26,12 @@
         {
             "type": "lldb",
             "request": "launch",
-            "name": "Debug example 'types'",
+            "name": "Debug example 'parser'",
             "cargo": {
                 "args": [
                     "build",
-                    "--example=types",
-                    "--package=lassy"
+                    "--example=parser",
+                    "--package=diyusi"
                 ],
                 "filter": {
                     "kind": "bin"
@@ -42,13 +43,13 @@
         {
             "type": "lldb",
             "request": "launch",
-            "name": "Debug unit tests in example 'types'",
+            "name": "Debug unit tests in example 'parser'",
             "cargo": {
                 "args": [
                     "test",
                     "--no-run",
-                    "--example=types",
-                    "--package=lassy"
+                    "--example=parser",
+                    "--package=diyusi"
                 ],
                 "filter": {
                     "kind": "bin"
