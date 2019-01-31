@@ -133,7 +133,8 @@ fn term<I>(indent_lvl: i64) -> impl Parser<Input = I, Output = ast::TermWithPos>
             attempt( ident().map(|i| ast::Term::Ident(i)) ),
             attempt( token(lexer::Token::Keyword(lexer::Keyword::Type)).map(|_| ast::Term::Universe) ),
             attempt( lit(indent_lvl).map(|lit| ast::Term::Lit(lit)) ),
-            attempt( token(lexer::Token::Op(lexer::Op::Question)).map(|_| ast::Term::Hole(None)) ),
+            attempt( token(lexer::Token::Op(lexer::Op::Question)).with(optional(ident()))
+                .map(|i| ast::Term::Hole(i)) ),
         )), position()).map(|(start, t, end)| ast::TermWithPos{term: Box::new(t), start, end}),
         attempt(
             token(lexer::Token::Sep(lexer::Sep::OpenParen)).skip(lfs())
@@ -144,7 +145,7 @@ fn term<I>(indent_lvl: i64) -> impl Parser<Input = I, Output = ast::TermWithPos>
             token(lexer::Token::Sep(lexer::Sep::Dollar)).skip(lfs())
             .with(expr(indent_lvl))
             .skip(look_ahead( indent().with(value(()))
-                .or(token(lexer::Token::Sep(lexer::Sep::Comma)).with(value(()))) ))
+                .or(token(lexer::Token::Sep(lexer::Sep::Comma)).with(value(()))).or(eof()) ))
         ),
     ))
 }

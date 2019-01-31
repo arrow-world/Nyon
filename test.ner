@@ -2,14 +2,19 @@ datatype nat
     z : nat
     s : nat -> nat
 
-add : nat -> nat -> nat
-add m n := case m of
-    nat.z => n
-    nat.s k => nat.s (add k n)
+add m n :=
+    case m of
+        nat.z => n
+        nat.s k => nat.s (add k n)
+: nat
 
-mul : nat -> nat -> nat
-mul m n := case m of
-    nat.z => nat.z
-    nat.s k => add (mul k n) n
+mul m n :=
+    case m of
+        nat.z => nat.z
+        nat.s k => add (mul k n) n
+: nat
 
 age_of_yjsnpi := mul 6 4
+
+id x := x
+y := id $ nat.s nat.z

@@ -160,7 +160,12 @@ fn translate_term(term: ast::TermWithPos, regctx: &mut RegisterCtx) -> Result<Rc
         ast::Term::Lit(lit) => translate_literal(lit, regctx)?,
         ast::Term::Hole(i) =>
             if let Some(i) = i {
-                unimplemented!()
+                /* let hole_id =
+                    if let Some(hole_id) = regctx.scope.resolve_named_hole(&i) { hole_id }
+                    else { regctx.scope.register_named_hole(i) };
+                
+                Rc::new(typechk::HoledTerm::Hole(hole_id)) */
+                unimplemented!();
             }
             else { Rc::new(typechk::HoledTerm::Hole(None)) }
     } )
