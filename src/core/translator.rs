@@ -387,14 +387,9 @@ impl RegisterCtx {
         if self.ac.vars.iter().any(|var| *var == name) { return Err(TranslateErr::ConflictedVar(name)); }
         self.ac.vars.push(name.clone());
 
-        let name_for_debug = name.clone();
-        println!("pushed {}. {:?}", &name_for_debug, &self.ac.vars);
-
         let b = f(self, name);
 
         self.ac.vars.pop();
-
-        println!("poped {}.", &name_for_debug);
 
         b
     }

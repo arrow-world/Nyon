@@ -1,5 +1,6 @@
 datatype nat
-    z : nat | s : nat -> nat
+    z : nat
+    s : nat -> nat
 
 add : nat -> nat -> nat
 add m n := case m of
