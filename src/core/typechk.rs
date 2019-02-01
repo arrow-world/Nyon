@@ -35,12 +35,6 @@ pub enum HoledConst {
     Ctor{datatype: ConstId, type_: Rc<HoledTerm>},
 }
 
-/* #[derive(Clone, Debug)]
-pub struct HoledDataType {
-    pub param_types: Vec<Rc<HoledTerm>>,
-    pub ctor_types: Vec<Rc<HoledTerm>>,
-} */
-
 pub struct HoledCtx {
     pub global: HoledEnv,
     pub local: Vec<Rc<HoledTerm>>,
@@ -193,7 +187,7 @@ pub struct InferEnv {
 #[derive(Clone, Debug)]
 pub struct InferTypedConst {
     c: Rc<InferConst>,
-    type_: Rc<InferConst>,
+    type_: Rc<InferTypedTerm>,
 }
 
 #[derive(Clone, Debug)]
@@ -220,19 +214,33 @@ pub struct InferTypedTerm {
  * Unify two terms of types, `a` and `b`, in a context `ctx`.
  * Note that these types need to be normalized enough.
  */
-pub fn unify(a: Rc<HoledTerm>, b: Rc<HoledTerm>, ctx: &Ctx) -> Result<Rc<HoledTerm>, UnifyErr> {
-    if let HoledTerm::Hole(..) = *b { return unify(b, a, ctx); }
+pub fn unify(a: Rc<InferTerm>, b: Rc<InferTerm>, ctx: &Ctx) -> Result<Rc<InferTerm>, UnifyErr> {
+    if let InferTerm::Infer{id} = *b { return unify(b, a, ctx); }
+    if let InferTerm::Hole(hole_id) = *b { return unify(b, a, ctx); }
 
-    match *a.clone() {
-        HoledTerm::Const(id_a) => match *b {
-            HoledTerm::Const(id_b) if id_a == id_b => Ok(a),
-            _ => Err(UnifyErr::TermsMismatched),
-        }
+    match *a {
+        InferTerm::App{s: s_a, t: t_a} => match *b {
+            InferTerm::App{s: s_b, t: t_b} => Ok(Rc::new( InferTerm::App {
+                s: InferTypedTerm{term: unify(s_a, s_b, ctx)?, type_: }, t: unify(t_a, t_b, ctx)?} )),
+            _ => Err(UnifyErr::TermStructureMismatched),
+        },
+        InferTerm::Const(id_a) => match *b {
+            InferTerm::Const(id_b) if id_a == id_b => Ok(a),
+            _ => Err(UnifyErr::TermStructureMismatched),
+        },
+        InferTerm::DBI(i) => match *b {
+            InferTerm::DBI(j) if i == j => Ok(a),
+            _ => Err(UnifyErr::TermStructureMismatched),
+        },
+        InferTerm::Universe => match *b {
+            InferTerm::Universe => Ok(a),
+            _ => Err(UnifyErr::TermStructureMismatched),
+        },
         _ => unimplemented!(),
     }
 }
 
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub enum UnifyErr {
-    TermsMismatched,
+    TermStructureMismatched,
 }

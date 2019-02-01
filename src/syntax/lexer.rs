@@ -155,8 +155,10 @@ fn ident<I>() -> impl Parser<Input = I, Output = String>
     use std::iter::{FromIterator, once};
     let us = || token('_');
 
-    (many::<String,_>(digit().or(us())), letter(), many::<String, _>(alpha_num().or(us())), many::<String,_>(token('\'')))
+    attempt(
+        (many::<String,_>(digit().or(us())), letter(), many::<String, _>(alpha_num().or(us())), many::<String,_>(token('\'')))
         .map( |(sl,ch,sr,ap)| String::from_iter( sl.chars().chain(once(ch)).chain(sr.chars()).chain(ap.chars()) ))
+    ).or(us().map(|c| String::from_iter(once(c))))
 }
 
 fn lit<I>() -> impl Parser<Input = I, Output = Lit>
