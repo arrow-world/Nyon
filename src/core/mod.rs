@@ -1,6 +1,6 @@
 mod modules;
 pub mod translator;
-mod typechk;
+pub mod typechk;
 
 pub use self::typechk::HoledTerm;
 

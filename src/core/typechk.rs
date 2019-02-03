@@ -77,19 +77,23 @@ pub struct Ctx {
     pub local: Vec<TypedTerm>,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Value {
     Nat(::num::BigInt),
     Int(::num::BigInt),
     Str(String),
 }
 
-pub fn typechk(ctx: HoledCtx) -> Result<Ctx, TypeChkErr> {
+pub fn typechk_env(env: HoledEnv) -> Result<Ctx, TypeChkErr> {
     let mut infer_ctx = InferCtx{global: InferEnv{consts: Vec::new()}, local: Vec::new(), typings: Vec::new()};
-    let mut next_infertype_id = 0;
-    for c in ctx.global.consts {
+    let mut next_inferterm_id = 0;
+
+    for c in env.consts {
+        infer_ctx.global.consts.push(assign_const(c, &mut next_inferterm_id));
     }
-    unimplemented!()
+    for t in env.typings {
+        infer_ctx.global.typings.push(assign_typing(t, &mut next_inferterm_id));
+    }
 }
 
 pub enum TypeChkErr {
@@ -107,7 +111,7 @@ fn assign_infertype_id(ctx: HoledCtx) -> InferCtx {
     }
 }
 
-fn assign_const(c: HoledConst, infertype_id: &mut u64) -> InferTypedConst {
+fn assign_const(c: HoledConst, inferterm_id: &mut InferTermId) -> InferTypedConst {
     /* match c {
         HoledConst::Def(t) => InferTypedConst{c: InferConst::Def(assign_term(t, infertype_id)), type_: },
     } */
@@ -115,47 +119,47 @@ fn assign_const(c: HoledConst, infertype_id: &mut u64) -> InferTypedConst {
     unimplemented!()
 }
 
-fn assign_term(term: Rc<HoledTerm>, infertype_id: &mut u64) -> InferTypedTerm {
+fn assign_term(term: Rc<HoledTerm>, inferterm_id: &mut InferTermId) -> InferTypedTerm {
     let itt = InferTypedTerm {
         term: Rc::new( match *term {
             HoledTerm::Const(ref id) => InferTerm::Const(*id),
             HoledTerm::DBI(ref i) => InferTerm::DBI(*i),
             HoledTerm::Universe => InferTerm::Universe,
             HoledTerm::App{ref s, ref t} =>
-                InferTerm::App{s: assign_term(s.clone(), infertype_id), t: assign_term(t.clone(), infertype_id)},
-            HoledTerm::Lam(ref abs) => InferTerm::Lam(assign_abs(abs.clone(), infertype_id)),
-            HoledTerm::Pi(ref abs) => InferTerm::Pi(assign_abs(abs.clone(), infertype_id)),
+                InferTerm::App{s: assign_term(s.clone(), inferterm_id), t: assign_term(t.clone(), inferterm_id)},
+            HoledTerm::Lam(ref abs) => InferTerm::Lam(assign_abs(abs.clone(), inferterm_id)),
+            HoledTerm::Pi(ref abs) => InferTerm::Pi(assign_abs(abs.clone(), inferterm_id)),
             HoledTerm::Let{ref env, ref t} =>
-                InferTerm::Let{env: assign_env(env.clone(), infertype_id), t: assign_term(t.clone(), infertype_id)},
+                InferTerm::Let{env: assign_env(env.clone(), inferterm_id), t: assign_term(t.clone(), inferterm_id)},
             HoledTerm::Case{ref t, ref cases, ref datatype} =>
                 InferTerm::Case{
-                    t: assign_term(t.clone(), infertype_id),
-                    cases: cases.iter().map(|case| assign_term(case.clone(), infertype_id)).collect(),
+                    t: assign_term(t.clone(), inferterm_id),
+                    cases: cases.iter().map(|case| assign_term(case.clone(), inferterm_id)).collect(),
                     datatype: *datatype,
                 },
             HoledTerm::Value(ref val) => InferTerm::Value(val.clone()),
             HoledTerm::Hole(ref hole_id) =>
-                if let Some(hole_id) = *hole_id {
-                    InferTerm::Hole(hole_id)
+                if let Some(id) = *hole_id {
+                    InferTerm::Infer{id: id}
                 }
                 else {
-                    let it = InferTerm::Infer{id: *infertype_id};
-                    *infertype_id += 1;
+                    let it = InferTerm::Infer{id: *inferterm_id};
+                    *inferterm_id += 1;
                     it
                 },
         } ),
-        type_: Rc::new(InferTerm::Infer{id: *infertype_id}),
+        type_: Rc::new( InferTerm::Infer{id: *inferterm_id} ),
     };
-    *infertype_id += 1;
+    *inferterm_id += 1;
     itt
 }
 
-fn assign_abs(abs: HoledAbs, infertype_id: &mut u64) -> InferAbs {
-    InferAbs{A: assign_term(abs.A, infertype_id), t: assign_term(abs.t, infertype_id)}
+fn assign_abs(abs: HoledAbs, inferterm_id: &mut InferTermId) -> InferAbs {
+    InferAbs{A: assign_term(abs.A, inferterm_id), t: assign_term(abs.t, inferterm_id)}
 }
 
-fn assign_env(env: HoledEnv, infertype_id: &mut u64) -> InferEnv {
-    InferEnv{consts: env.consts.into_iter().map(|c| assign_const(c, infertype_id)).collect()}
+fn assign_env(env: HoledEnv, inferterm_id: &mut InferTermId) -> InferEnv {
+    InferEnv{consts: env.consts.into_iter().map(|c| assign_const(c, inferterm_id)).collect()}
 }
 
 #[derive(Clone, Debug)]
@@ -169,8 +173,7 @@ pub enum InferTerm {
     Let{env: InferEnv, t: InferTypedTerm},
     Case{t: InferTypedTerm, cases: Vec<InferTypedTerm>, datatype: Option<ConstId>},
     Value(Value),
-    Infer{id: u64},
-    Hole(HoleId),
+    Infer{id: InferTermId},
 }
 
 #[derive(Clone, Debug)]
@@ -210,24 +213,31 @@ pub struct InferTypedTerm {
     type_: Rc<InferTerm>,
 }
 
-/*
- * Unify two terms of types, `a` and `b`, in a context `ctx`.
- * Note that these types need to be normalized enough.
- */
-pub fn unify(a: Rc<InferTerm>, b: Rc<InferTerm>, ctx: &Ctx) -> Result<Rc<InferTerm>, UnifyErr> {
-    if let InferTerm::Infer{id} = *b { return unify(b, a, ctx); }
-    if let InferTerm::Hole(hole_id) = *b { return unify(b, a, ctx); }
+type Subst = Vec<(InferTermId, Rc<InferTerm>)>;
+type InferTermId = usize;
 
-    match *a {
-        InferTerm::App{s: s_a, t: t_a} => match *b {
-            InferTerm::App{s: s_b, t: t_b} => Ok(Rc::new( InferTerm::App {
-                s: InferTypedTerm{term: unify(s_a, s_b, ctx)?, type_: }, t: unify(t_a, t_b, ctx)?} )),
-            _ => Err(UnifyErr::TermStructureMismatched),
+/*
+ * Unify two terms, `a` and `b`, in a context `ctx`.
+ * Note that these terms need to be normalized enough.
+ */
+pub fn unify(a: Rc<InferTerm>, b: Rc<InferTerm>, ctx: &InferCtx, subst: &mut Subst) -> Result<Rc<InferTerm>, UnifyErr> {
+    if let InferTerm::Infer{..} = *b {
+        if let InferTerm::Infer{..} = *a {}
+        else { return unify(b, a, ctx, subst); }
+    }
+
+    match *a.clone() {
+        InferTerm::Infer{id: id_a} => match *b {
+            InferTerm::Infer{id: id_b} if id_a == id_b => Ok(a),
+            _ => {
+                subst.push((id_a, b.clone()));
+                Ok(b)
+            },
         },
-        InferTerm::Const(id_a) => match *b {
+        InferTerm::Const(id_a) => /*match *b {
             InferTerm::Const(id_b) if id_a == id_b => Ok(a),
             _ => Err(UnifyErr::TermStructureMismatched),
-        },
+        }*/ unimplemented!(),
         InferTerm::DBI(i) => match *b {
             InferTerm::DBI(j) if i == j => Ok(a),
             _ => Err(UnifyErr::TermStructureMismatched),
@@ -236,11 +246,46 @@ pub fn unify(a: Rc<InferTerm>, b: Rc<InferTerm>, ctx: &Ctx) -> Result<Rc<InferTe
             InferTerm::Universe => Ok(a),
             _ => Err(UnifyErr::TermStructureMismatched),
         },
-        _ => unimplemented!(),
+        InferTerm::App{s: ref s_a, t: ref t_a} => match *b {
+            InferTerm::App{s: ref s_b, t: ref t_b} => Ok(Rc::new( InferTerm::App {
+                s: unify_typed(s_a.clone(), s_b.clone(), ctx, subst)?,
+                t: unify_typed(t_a.clone(), t_b.clone(), ctx, subst)?,
+            } )),
+            _ => Err(UnifyErr::TermStructureMismatched),
+        },
+        InferTerm::Lam(InferAbs{A: ref A_a, t: ref t_a}) => match *b {
+            InferTerm::Lam(InferAbs{A: ref A_b, t: ref t_b}) => Ok(Rc::new( InferTerm::Lam( InferAbs {
+                A: unify_typed(A_a.clone(), A_b.clone(), ctx, subst)?,
+                t: unify_typed(t_a.clone(), t_b.clone(), ctx, subst)?
+            } ) )),
+            _ => Err(UnifyErr::TermStructureMismatched),
+        }
+        InferTerm::Pi(InferAbs{A: ref A_a, t: ref t_a}) => match *b {
+            InferTerm::Pi(InferAbs{A: ref A_b, t: ref t_b}) => Ok(Rc::new( InferTerm::Pi( InferAbs {
+                A: unify_typed(A_a.clone(), A_b.clone(), ctx, subst)?,
+                t: unify_typed(t_a.clone(), t_b.clone(), ctx, subst)?,
+            } ) )),
+            _ => Err(UnifyErr::TermStructureMismatched),
+        },
+        InferTerm::Let{..} => unimplemented!(),
+        InferTerm::Case{..} => unimplemented!(),
+        InferTerm::Value(ref v_a) => match *b {
+            InferTerm::Value(ref v_b) =>
+                if v_a == v_b { Ok(a) }
+                else { Err(UnifyErr::ValueMismatched(v_a.clone(), v_b.clone())) },
+            _ => Err(UnifyErr::TermStructureMismatched),
+        },
     }
+}
+
+fn unify_typed(a: InferTypedTerm, b: InferTypedTerm, ctx: &InferCtx, subst: &mut Subst)
+    -> Result<InferTypedTerm, UnifyErr>
+{
+    Ok( InferTypedTerm{term: unify(a.term, b.term, ctx, subst)?, type_: unify(a.type_, b.type_, ctx, subst)?} )
 }
 
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub enum UnifyErr {
     TermStructureMismatched,
+    ValueMismatched(Value, Value),
 }
