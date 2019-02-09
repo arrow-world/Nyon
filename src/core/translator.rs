@@ -213,7 +213,7 @@ fn translate_abs(x: String, A: ast::TermWithPos, t: ast::TermWithPos, regctx: &m
     } )
 }
 
-fn translate_parametric_term<I, F>(term: ast::TermWithPos, mut params: I, regctx: &mut RegisterCtx, abs_term: F)
+fn translate_parametric_term<I, F>(term: ast::TermWithPos, params: I, regctx: &mut RegisterCtx, abs_term: F)
     -> Result<Rc<typechk::HoledTerm>, TranslateErr>
     where I: DoubleEndedIterator<Item = String>,
           F: Fn(typechk::HoledAbs) -> typechk::HoledTerm + Clone,

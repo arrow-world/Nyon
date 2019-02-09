@@ -1,6 +1,7 @@
 extern crate diyusi;
 use diyusi::syntax;
 use diyusi::core;
+use diyusi::typechk;
 use std::fs::File;
 use std::io::prelude::*;
 

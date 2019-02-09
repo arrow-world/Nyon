@@ -34,6 +34,7 @@ impl From<Env> for typechk::HoledEnv {
         typechk::HoledEnv {
             consts: env.consts.into_iter().map(|c| c.unwrap()).collect(),
             typings: env.typings.into_iter().map(|t| t.unwrap()).collect(),
+            nof_named_hole: 0,
         }
     }
 }

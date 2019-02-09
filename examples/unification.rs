@@ -5,7 +5,7 @@ fn main() {
     use std::rc::Rc;
 
     let ctx = InferCtx {
-        global: InferEnv{consts: Vec::new()},
+        consts: Vec::new(),
         local: Vec::new(),
         typings: Vec::new(),
     };

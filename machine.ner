@@ -1,0 +1,30 @@
+datatype Automaton (State Input Output):type
+    transition: (Input -> State -> Output*State) -> State -> Automaton
+    composition: Automaton S0 A B -> Automaton S1 B C -> Automaton S0*S1 A C
+
+memory T:type init:T := Automaton.transition
+    \i:{store:T->*, load:*} -> \s:T -> (
+        case i of
+            store x => (Maybe.none, x)
+            load => (Maybe.just s, s)
+    )
+    init
+
+module list
+    datatype List T:type
+        nil: List
+        cons: T -> List -> List
+    
+    use List *
+
+    map {A,B:type} f:A->B l:List A :=
+        case l of
+            List.nil => nil
+            List.cons x xs => List.cons (f x) (list_map f xs)
+
+def refined_type Functor {A,B:type} (F: type -> type, fmap: (A->B) -> F A -> F B)
+    fmap id = id and
+    forall T,U,R:type -> forall f:T->U, g:U->R -> fmap g*f = (fmap g)*(fmap f)
+
+inc_f xs:F, fmap: (Nat -> Nat) -> F Nat -> F Nat where functor? (F,fmap) :=
+    fmap (\x -> x+1) xs
