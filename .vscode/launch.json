@@ -4,7 +4,6 @@
     // 詳細情報は次を確認してください: https://go.microsoft.com/fwlink/?linkid=830387
     "version": "0.2.0",
     "configurations": [
-        
         {
             "type": "lldb",
             "request": "launch",
@@ -55,6 +54,19 @@
                     "kind": "bin"
                 }
             },
+            "args": [],
+            "cwd": "${workspaceFolder}"
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Debug Run",
+            "sourceLanguages": [
+                "rust"
+            ],
+            "terminal": "integrated",
+            "preLaunchTask": "Rust: cargo build",
+            "program": "${workspaceRoot}/target/debug/examples/parser.exe",
             "args": [],
             "cwd": "${workspaceFolder}"
         }

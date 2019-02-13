@@ -1,8 +1,10 @@
-use super::{ConstId, HoleId};
+use std::cell::Cell;
+use std::collections::HashMap;
+use super::{ConstId, HoleId, SpecialType};
 
 use std::rc::Rc;
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum HoledTerm {
     Const(ConstId),
     DBI(u64),
@@ -16,36 +18,36 @@ pub enum HoledTerm {
     Value(Value),
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct HoledAbs {
     pub A: Rc<HoledTerm>,
     pub t: Rc<HoledTerm>,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct HoledEnv {
     pub consts: Vec<HoledConst>,
     pub typings: Vec<(Rc<HoledTerm>, Rc<HoledTerm>)>,
     pub nof_named_hole: usize,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum HoledConst {
     Def(Rc<HoledTerm>),
-    DataType{param_types: Vec<Rc<HoledTerm>>},
-    Ctor{datatype: ConstId, type_: Rc<HoledTerm>},
+    DataType{param_types: Vec<Rc<HoledTerm>>, ctors: Vec<ConstId>},
+    Ctor{datatype: ConstId, param_types: Vec<Rc<HoledTerm>>},
 }
 
 #[derive(Clone, Debug)]
 pub enum Term {
     Const(ConstId),
-    DBI(u64),
+    DBI(usize),
     Universe,
     App{s: TypedTerm, t: TypedTerm},
     Lam(Abs),
     Pi(Abs),
     Let{env: Env, t: TypedTerm},
-    Case{t: TypedTerm, cases: Vec<Rc<Term>>},
+    Case{t: TypedTerm, cases: Vec<TypedTerm>},
     Value(Value),
 }
 
@@ -60,9 +62,19 @@ pub struct TypedTerm {
     tower: Vec<Rc<Term>>,
 }
 
+type Env = Vec<TypedConst>;
+
 #[derive(Clone, Debug)]
-pub struct Env {
-    pub consts: Vec<TypedTerm>,
+pub enum Const {
+    Def(TypedTerm),
+    DataType{param_types: Vec<TypedTerm>},
+    Ctor{datatype: ConstId, param_types: Vec<TypedTerm>},
+}
+
+#[derive(Clone, Debug)]
+pub struct TypedConst {
+    c: Const,
+    type_: TypedTerm,
 }
 
 #[derive(Clone, Debug)]
@@ -118,59 +130,278 @@ pub enum Value {
 */
 
 pub fn typechk(env: HoledEnv) -> Result<Env, TypeChkErr> {
-    // let mut infer_ctx = InferCtx{global: InferEnv{consts: Vec::new()}, local: Vec::new(), typings: Vec::new()};
     let mut next_inferterm_id = 0;
-    let mut consts = assign_env(env, &mut next_inferterm_id);
-    let mut substs = consts.iter().map( |c| unimplemented!() );
+    let mut ctx = InferCtx {
+        consts: assign_consts(env.consts, &mut next_inferterm_id),
+        local: vec![],
+        typings: env.typings.into_iter().map( |(t,T)|
+            (assign_term(t, &mut next_inferterm_id), assign_term(T, &mut next_inferterm_id))
+        ).collect(),
+    };
 
-    unimplemented!()
+    let mut substs: Vec<Subst> = vec![];
+    let mut substs_map: HashMap<InferTermId, Rc<InferTerm>> = HashMap::new();
+    loop {
+        typechk_ctx(&ctx, &mut substs, &mut next_inferterm_id)?;
+
+        while !substs.is_empty() {
+            for subst in substs.split_off(0) {
+                match subst {
+                    Subst::Eq(mut lhs, mut rhs) => {
+                        if rhs > lhs { ::std::mem::swap(&mut lhs, &mut rhs); }
+                        assert!(lhs > rhs);
+
+                        if let Some(instance) = substs_map.remove(&lhs.get()) {
+                            if let Some(other) = substs_map.get(&rhs.get()) {
+                                unify(instance.clone(), other.clone(), &ctx, &mut substs)?;
+                            }
+                            substs_map.insert(rhs.get(), instance);
+                        }
+                        lhs.set(rhs.get());
+                    },
+                    Subst::Instantiate(id, instance) => {
+                        if let Some(other) = substs_map.get(&id.get()).cloned() {
+                            unify(instance, other, &ctx, &mut substs)?;
+                        }
+                        else {
+                            substs_map.insert(id.get(), instance);
+                        }
+                    }
+                }
+            }
+        }
+
+        let subst_result = subst_infers(&mut ctx, &mut substs_map);
+        if !subst_result.found_infer {
+            break;
+        }
+        else if !subst_result.has_substed {
+            return Err(TypeChkErr::InferFailure);
+        }
+    }
+
+    Ok( cast_no_infer(ctx) )
 }
 
-fn typechk_ctx(ctx: &InferCtx, substs: &mut Vec<Subst>) -> Result<(), TypeChkErr> {
+fn subst_infers(ctx: &mut InferCtx, substs_map: &mut HashMap<InferTermId, Rc<InferTerm>>) -> SubstResult {
+    assert!(ctx.local.is_empty());
+
+    let mut result = SubstResult{has_substed: false, found_infer: false};
+
+    for c in &mut ctx.consts {
+        match c.c {
+            InferConst::Def(ref mut t) =>
+                subst_infers_typed_term(t, substs_map, &mut result),
+            InferConst::DataType{ref mut param_types, ref ctors} =>
+                for param_type in param_types {
+                    subst_infers_typed_term(param_type, substs_map, &mut result);
+                },
+            InferConst::Ctor{datatype: _datatype, ref mut param_types} =>
+                param_types.iter_mut().for_each(
+                    |param_type| subst_infers_typed_term(param_type, substs_map, &mut result)
+                ),
+        }
+    }
+
+    for (t,T) in &mut ctx.typings {
+        subst_infers_typed_term(t, substs_map, &mut result);
+        subst_infers_typed_term(T, substs_map, &mut result);
+    }
+
+    return result;
+
+    fn subst_infers_typed_term(t: &mut InferTypedTerm, substs: &mut Substs, result: &mut SubstResult) {
+        for term in &mut t.tower {
+            subst_infers_term(term, substs, result);
+        }
+    }
+
+    fn subst_infers_term(t: &mut Rc<InferTerm>, substs: &mut Substs, result: &mut SubstResult) {
+        match *t.clone() {
+            InferTerm::Infer{ref id} => {
+                if let Some(instance) = substs.get(&id.get()) {
+                    *Rc::make_mut(t) = (**instance).clone();
+                    result.has_substed = true;
+                }
+                result.found_infer = true;
+            },
+            _ => (),
+        }
+    }
+    
+    type Substs = HashMap<InferTermId, Rc<InferTerm>>;
+}
+pub struct SubstResult {
+    has_substed: bool,
+    found_infer: bool,
+}
+
+fn cast_no_infer(ctx: InferCtx) -> Env {
+    assert!(ctx.local.is_empty());
+
+    ctx.typings.into_iter().for_each( |(t,T)| {
+        cast_no_infer_typed_term(t);
+        cast_no_infer_typed_term(T);
+    } );
+
+    return cast_no_infer_env(ctx.consts);
+
+    fn cast_no_infer_env(env: InferEnv) -> Env {
+        env.into_iter().map( |c| TypedConst {
+            c: match c.c {
+                InferConst::Def(t) => Const::Def(cast_no_infer_typed_term(t)),
+                InferConst::DataType{param_types, ctors} => Const::DataType {
+                    param_types: param_types.into_iter().map(|T| cast_no_infer_typed_term(T)).collect(),
+                },
+                InferConst::Ctor{datatype, param_types} => Const::Ctor {
+                    datatype,
+                    param_types: param_types.into_iter()
+                        .map(|param_type| cast_no_infer_typed_term(param_type)).collect(),
+                },
+            },
+            type_: cast_no_infer_typed_term(c.type_),
+        } ).collect()
+    }
+
+    fn cast_no_infer_typed_term(term: InferTypedTerm) -> TypedTerm {
+        TypedTerm{tower: term.tower.into_iter().map(|t| cast_no_infer_term(t)).collect()}
+    }
+
+    fn cast_no_infer_term(term: Rc<InferTerm>) -> Rc<Term> {
+        Rc::new( match *term {
+            InferTerm::Const(const_id) => Term::Const(const_id),
+            InferTerm::DBI(i) => Term::DBI(i),
+            InferTerm::Universe => Term::Universe,
+            InferTerm::App{ref s, ref t} => Term::App {
+                s: cast_no_infer_typed_term(s.clone()),
+                t: cast_no_infer_typed_term(t.clone()),
+            },
+            InferTerm::Lam(ref abs) => Term::Lam(cast_no_infer_abs(abs.clone())),
+            InferTerm::Pi(ref abs) => Term::Pi(cast_no_infer_abs(abs.clone())),
+            InferTerm::Let{ref env, ref t} => Term::Let {
+                env: cast_no_infer_env(env.clone()),
+                t: cast_no_infer_typed_term(t.clone()),
+            },
+            InferTerm::Case{ref t, ref cases, ref datatype} => Term::Case {
+                t: cast_no_infer_typed_term(t.clone()),
+                cases: cases.iter().map(|t| cast_no_infer_typed_term(t.clone())).collect(),
+            },
+            InferTerm::Value(ref v) => Term::Value(v.clone()),
+            InferTerm::Infer{..} => unreachable!(),
+        } )
+    }
+
+    fn cast_no_infer_abs(abs: InferAbs) -> Abs {
+        Abs{A: cast_no_infer_typed_term(abs.A), t: cast_no_infer_typed_term(abs.t)}
+    }
+}
+
+fn typechk_ctx(ctx: &InferCtx, substs: &mut Vec<Subst>, next_inferterm_id: &mut InferTermId)
+    -> Result<(), TypeChkErr>
+{
+    // checks W-Global-Def
+    for (const_id, c) in ctx.consts.iter().enumerate() {
+        typechk_const(ctx, c, const_id, substs, next_inferterm_id)?;
+    }
+
     // checks W-Local-Assum
     for T in &ctx.local {
+        typechk_term(ctx, T, substs, next_inferterm_id)?;
+
         unify(T.tower[1].clone(), Rc::new(InferTerm::Universe), ctx, substs)?;
     }
 
-    // checks W-Global_Assum
+    // checks W-Global-Assum
     for (t,T) in &ctx.typings {
+        typechk_term(ctx, t, substs, next_inferterm_id)?;
+        typechk_term(ctx, T, substs, next_inferterm_id)?;
+
         unify(T.tower[1].clone(), Rc::new(InferTerm::Universe), ctx, substs)?;
     }
 
     Ok(())
 }
 
-fn typechk_const(ctx: &InferCtx, c: InferTypedConst, substs: &mut Vec<Subst>, next_inferterm_id: &mut InferTermId)
+fn typechk_const (
+    ctx: &InferCtx,
+    c: &InferTypedConst, id: ConstId,
+    substs: &mut Vec<Subst>,
+    next_inferterm_id: &mut InferTermId
+)
     -> Result<(), TypeChkErr>
 {
-    unimplemented!()
-}
+    match c.c {
+        InferConst::Def(ref t) => {
+            typechk_term(ctx, t, substs, next_inferterm_id)?;
+            unify(c.type_.tower[0].clone(), t.tower[1].clone(), ctx, substs)?;
+        },
+        InferConst::DataType{ref param_types, ref ctors} => {
+            for param_type in param_types {
+                typechk_term(ctx, param_type, substs, next_inferterm_id)?;
+            }
 
-fn typechk_term(ctx: &InferCtx, term: InferTypedTerm, substs: &mut Vec<Subst>, next_inferterm_id: &mut InferTermId)
-    -> Result<(), TypeChkErr>
-{
-    fn new_inferterm(next_inferterm_id: &mut InferTermId) -> Rc<InferTerm> {
-        let id = *next_inferterm_id;
-        *next_inferterm_id += 1;
-        Rc::new(InferTerm::Infer{id})
+            let universe = Rc::new(InferTerm::Universe);
+            let type_ = param_types.iter().fold( universe.clone(),
+                |U, param_type| Rc::new( InferTerm::Pi( InferAbs {
+                    A: param_type.clone(),
+                    t: InferTypedTerm{tower: vec![U, universe.clone()]},
+                } ) )
+            );
+            unify(c.type_.tower[0].clone(), type_, ctx, substs)?;
+        },
+        InferConst::Ctor{datatype, ref param_types} => {
+            for param_type in param_types {
+                typechk_term(ctx, param_type, substs, next_inferterm_id)?;
+            }
+
+            let datatype_param_types =
+                if let InferConst::DataType{ref param_types, ..} = ctx.consts[datatype].c { param_types }
+                else { unreachable!() };
+
+            let universe = Rc::new(InferTerm::Universe);
+            
+            let type_ =
+                datatype_param_types.iter().chain(param_types).rev().fold(
+                    (0..datatype_param_types.len()).rev().fold( Rc::new(InferTerm::Const(datatype)),
+                        |f, dbi_offset| Rc::new( InferTerm::App {
+                            s: InferTypedTerm{tower: vec![f, Rc::new(new_inferterm(next_inferterm_id))]}, 
+                            t: InferTypedTerm { tower: vec![
+                                Rc::new(InferTerm::DBI(param_types.len() + dbi_offset)),
+                                Rc::new(new_inferterm(next_inferterm_id)),
+                            ] },
+                        })
+                    ),
+                    |tail, param_type| Rc::new( InferTerm::Pi( InferAbs {
+                        A: param_type.clone(),
+                        t: InferTypedTerm{tower: vec![tail, universe.clone()]},
+                    } ) )
+                );
+            
+            unify(c.type_.tower[0].clone(), type_, ctx, substs)?;
+        },
     }
 
+    Ok(())
+}
+
+fn typechk_term(ctx: &InferCtx, term: &InferTypedTerm, substs: &mut Vec<Subst>, next_inferterm_id: &mut InferTermId)
+    -> Result<(), TypeChkErr>
+{
     match *term.tower[0] {
         InferTerm::Const(const_id) =>
             unify(term.tower[1].clone(), ctx.consts[const_id].type_.tower[0].clone(), ctx, substs)?,
-        InferTerm::DBI(i) =>
-            unify(term.tower[1].clone(), ctx.local(i).tower[0].clone(), ctx, substs)?,
+        InferTerm::DBI(i) => unify(term.tower[1].clone(), ctx.local(i).tower[0].clone(), ctx, substs)?,
         InferTerm::Universe =>
             unify(term.tower[1].clone(), term.tower[0].clone(), ctx, substs)?,
-        InferTerm::App{ref s, ref t} => {
-            typechk_term(ctx, s.clone(), substs, next_inferterm_id)?;
-            typechk_term(ctx, t.clone(), substs, next_inferterm_id)?;
+        InferTerm::App{s: ref t, t: ref u} => {
+            typechk_term(ctx, t, substs, next_inferterm_id)?;
+            typechk_term(ctx, u, substs, next_inferterm_id)?;
             
-            let T = new_inferterm(next_inferterm_id);
+            let T = Rc::new(new_inferterm(next_inferterm_id));
 
-            unify( s.tower[1].clone(),
+            unify( t.tower[1].clone(),
                 Rc::new( InferTerm::Pi( InferAbs {
-                    A: InferTypedTerm{tower: vec![ t.tower[1].clone(), Rc::new(InferTerm::Universe) ]},
+                    A: InferTypedTerm{tower: vec![ u.tower[1].clone(), Rc::new(InferTerm::Universe) ]},
                     t: InferTypedTerm{tower: vec![ T.clone(), Rc::new(InferTerm::Universe) ]},
                 } ) ),
                 ctx, substs )?;
@@ -178,23 +409,23 @@ fn typechk_term(ctx: &InferCtx, term: InferTypedTerm, substs: &mut Vec<Subst>, n
             unify( term.tower[1].clone(),
                 Rc::new( InferTerm::App {
                     s: InferTypedTerm{tower: vec![T, Rc::new(InferTerm::Universe)]},
-                    t: InferTypedTerm{tower: vec![t.tower[0].clone(), Rc::new(InferTerm::Universe)]},
+                    t: InferTypedTerm{tower: vec![u.tower[0].clone(), Rc::new(InferTerm::Universe)]},
                 } ),
                 ctx, substs )?;
         },
         InferTerm::Lam(InferAbs{A: ref T, ref t}) => {
-            typechk_term(ctx, T.clone(), substs, next_inferterm_id)?;
-            typechk_term(ctx, t.clone(), substs, next_inferterm_id)?;
+            typechk_term(ctx, T, substs, next_inferterm_id)?;
+            typechk_term(ctx, t, substs, next_inferterm_id)?;
 
             let universe = Rc::new(InferTerm::Universe);
-            let U = new_inferterm(next_inferterm_id);
+            let U = Rc::new(new_inferterm(next_inferterm_id));
 
             unify(term.tower[1].clone(), universe, ctx, substs)?;
             unify(t.tower[1].clone(), U, ctx, substs)?;
         },
         InferTerm::Pi(InferAbs{A: ref T, t: ref U}) => {
-            typechk_term(ctx, T.clone(), substs, next_inferterm_id)?;
-            typechk_term(ctx, U.clone(), substs, next_inferterm_id)?;
+            typechk_term(ctx, T, substs, next_inferterm_id)?;
+            typechk_term(ctx, U, substs, next_inferterm_id)?;
 
             let universe = Rc::new(InferTerm::Universe);
 
@@ -207,16 +438,59 @@ fn typechk_term(ctx: &InferCtx, term: InferTypedTerm, substs: &mut Vec<Subst>, n
             unify(term.tower[1].clone(), universe, ctx, substs)?;
         },
         InferTerm::Let{ref env, ref t} => {
-            for c in env {
-                typechk_const(ctx, c.clone(), substs, next_inferterm_id)?;
-            }
-
             let mut local_ctx = ctx.clone();
             local_ctx.consts.extend(env.iter().cloned());
-            typechk_term(&local_ctx, t.clone(), substs, next_inferterm_id)?;
+
+            let base_const_id = ctx.consts.len();
+            for (offset, c) in env.iter().enumerate() {
+                typechk_const(ctx, c, base_const_id + offset, substs, next_inferterm_id)?;
+            }
+
+            typechk_term(&local_ctx, t, substs, next_inferterm_id)?;
+
+            unify(term.tower[1].clone(), t.tower[1].clone(), ctx, substs)?;
         },
-        InferTerm::Case{ref t, ref cases, ref datatype} => unimplemented!(),
-        InferTerm::Value(ref v) => unimplemented!(),
+        InferTerm::Case{ref t, ref cases, ref datatype} => {
+            typechk_term(ctx, t, substs, next_inferterm_id)?;
+            for case in cases {
+                typechk_term(ctx, case, substs, next_inferterm_id)?;
+            }
+
+            if let Some(datatype) = datatype {
+                unify(t.tower[1].clone(), Rc::new(InferTerm::Const(*datatype)), ctx, substs)?;
+
+                let types_of_cases: Vec<Rc<InferTerm>> = cases.iter().enumerate().map( |(ctor_no, case)| {
+                    let type_ = Rc::new(new_inferterm(next_inferterm_id));
+
+                    let ctors =
+                        if let InferConst::DataType{ref ctors, ..} = ctx.consts[*datatype].c { ctors }
+                        else { unreachable!() };
+                    
+                    let type_of_ctor = ctx.consts[ctors[ctor_no]].type_.tower[0].clone();
+                    unify(case.tower[1].clone(), type_of_ctor, ctx, substs)?;
+
+                    Ok(type_)
+                } ).collect::<Result<_, UnifyErr>>()?;
+
+                let universe = Rc::new(InferTerm::Universe);
+
+                let type_ = Rc::new( InferTerm::Case {
+                    t: t.clone(),
+                    cases:
+                        types_of_cases.into_iter()
+                            .map( |T| InferTypedTerm{tower: vec![T, universe.clone()]} ).collect(),
+                    datatype: Some(*datatype),
+                } );
+
+                unify(term.tower[1].clone(), type_, ctx, substs)?;
+            }
+        },
+        InferTerm::Value(ref v) =>
+            unify(term.tower[1].clone(), match *v {
+                Value::Nat(..) => unimplemented!(),
+                Value::Int(..) => unimplemented!(),
+                Value::Str(..) => unimplemented!(),
+            }, ctx, substs)?,
         InferTerm::Infer{..} => (),
     }
 
@@ -231,8 +505,10 @@ fn typechk_typing(ctx: &InferCtx, t: InferTypedTerm, T: InferTypedTerm, substs: 
     Ok(())
 }
 
+#[derive(Clone, Debug)]
 pub enum TypeChkErr {
     UnifyErr(UnifyErr),
+    InferFailure,
 }
 impl From<UnifyErr> for TypeChkErr {
     fn from(e: UnifyErr) -> Self {
@@ -240,18 +516,25 @@ impl From<UnifyErr> for TypeChkErr {
     }
 }
 
+fn assign_consts(consts: Vec<HoledConst>, inferterm_id: &mut InferTermId) -> InferEnv {
+    consts.into_iter().map(|c| assign_const(c, inferterm_id)).collect()
+}
+
 fn assign_const(c: HoledConst, inferterm_id: &mut InferTermId) -> InferTypedConst {
     let itc = InferTypedConst {
         c: match c {
             HoledConst::Def(t) => InferConst::Def(assign_term(t, inferterm_id)),
-            HoledConst::DataType{param_types} => InferConst::DataType {
+            HoledConst::DataType{param_types, ctors} => InferConst::DataType {
                 param_types: param_types.into_iter().map(|t| assign_term(t, inferterm_id)).collect(),
+                ctors,
             },
-            HoledConst::Ctor{datatype, type_} => InferConst::Ctor{datatype, type_: assign_term(type_, inferterm_id)},
+            HoledConst::Ctor{datatype, param_types} => InferConst::Ctor {
+                datatype,
+                param_types: param_types.into_iter().map(|T| assign_term(T, inferterm_id)).collect(),
+            },
         },
-        type_: InferTypedTerm{tower: (0..1).map(|i| Rc::new(InferTerm::Infer{id: *inferterm_id + i})).collect()},
+        type_: InferTypedTerm{tower: vec![Rc::new(new_inferterm(inferterm_id)), Rc::new(InferTerm::Universe)]},
     };
-    *inferterm_id += 2;
 
     itc
 }
@@ -267,8 +550,15 @@ fn assign_term(term: Rc<HoledTerm>, inferterm_id: &mut InferTermId) -> InferType
                     InferTerm::App{s: assign_term(s.clone(), inferterm_id), t: assign_term(t.clone(), inferterm_id)},
                 HoledTerm::Lam(ref abs) => InferTerm::Lam(assign_abs(abs.clone(), inferterm_id)),
                 HoledTerm::Pi(ref abs) => InferTerm::Pi(assign_abs(abs.clone(), inferterm_id)),
-                HoledTerm::Let{ref env, ref t} =>
-                    InferTerm::Let{env: assign_env(env.clone(), inferterm_id), t: assign_term(t.clone(), inferterm_id)},
+                HoledTerm::Let{ref env, ref t} => {
+                    assert!(env.typings.is_empty());
+                    assert_eq!(env.nof_named_hole, 0);
+
+                    InferTerm::Let {
+                        env: assign_consts(env.consts.clone(), inferterm_id),
+                        t: assign_term(t.clone(), inferterm_id)
+                    }
+                }
                 HoledTerm::Case{ref t, ref cases, ref datatype} =>
                     InferTerm::Case{
                         t: assign_term(t.clone(), inferterm_id),
@@ -278,28 +568,27 @@ fn assign_term(term: Rc<HoledTerm>, inferterm_id: &mut InferTermId) -> InferType
                 HoledTerm::Value(ref val) => InferTerm::Value(val.clone()),
                 HoledTerm::Hole(ref hole_id) =>
                     if let Some(id) = *hole_id {
-                        InferTerm::Infer{id: id}
+                        InferTerm::Infer{id: Rc::new(Cell::new(id))}
                     }
                     else {
-                        let it = InferTerm::Infer{id: *inferterm_id};
-                        *inferterm_id += 1;
-                        it
+                        new_inferterm(inferterm_id)
                     },
             } ),
-            Rc::new(InferTerm::Infer{id: *inferterm_id}),
+            Rc::new(new_inferterm(inferterm_id)),
         ],
     };
-    *inferterm_id += 1;
 
     itt
 }
 
-fn assign_abs(abs: HoledAbs, inferterm_id: &mut InferTermId) -> InferAbs {
-    InferAbs{A: assign_term(abs.A, inferterm_id), t: assign_term(abs.t, inferterm_id)}
+fn new_inferterm(next_inferterm_id: &mut InferTermId) -> InferTerm {
+    let id = Rc::new(Cell::new(*next_inferterm_id));
+    *next_inferterm_id += 1;
+    InferTerm::Infer{id}
 }
 
-fn assign_env(env: HoledEnv, inferterm_id: &mut InferTermId) -> InferEnv {
-    env.consts.into_iter().map(|c| assign_const(c, inferterm_id)).collect()
+fn assign_abs(abs: HoledAbs, inferterm_id: &mut InferTermId) -> InferAbs {
+    InferAbs{A: assign_term(abs.A, inferterm_id), t: assign_term(abs.t, inferterm_id)}
 }
 
 #[derive(Clone, Debug)]
@@ -313,7 +602,7 @@ pub enum InferTerm {
     Let{env: InferEnv, t: InferTypedTerm},
     Case{t: InferTypedTerm, cases: Vec<InferTypedTerm>, datatype: Option<ConstId>},
     Value(Value),
-    Infer{id: InferTermId},
+    Infer{id: Rc<Cell<InferTermId>>},
 }
 
 #[derive(Clone, Debug)]
@@ -325,14 +614,14 @@ pub struct InferAbs {
 #[derive(Clone, Debug)]
 pub struct InferTypedConst {
     c: InferConst,
-    type_: InferTypedTerm, // Filled before a type checking.
+    type_: InferTypedTerm,
 }
 
 #[derive(Clone, Debug)]
 pub enum InferConst {
     Def(InferTypedTerm),
-    DataType{param_types: Vec<InferTypedTerm>},
-    Ctor{datatype: ConstId, type_: InferTypedTerm},
+    DataType{param_types: Vec<InferTypedTerm>, ctors: Vec<ConstId>},
+    Ctor{datatype: ConstId, param_types: Vec<InferTypedTerm>},
 }
 
 type InferEnv = Vec<InferTypedConst>;
@@ -345,7 +634,7 @@ pub struct InferCtx {
 }
 impl InferCtx {
     fn local(&self, dbi: usize) -> &InferTypedTerm {
-        &self.local[self.local.len() - dbi]
+        &self.local[self.local.len() - dbi - 1]
     }
 }
 
@@ -358,13 +647,13 @@ type InferTermId = usize;
 
 #[derive(Clone, Debug)]
 pub enum Subst {
-    Eq(InferTermId, InferTermId),
-    Concrete(InferTermId, Rc<InferTerm>),
+    Eq(Rc<Cell<InferTermId>>, Rc<Cell<InferTermId>>),
+    Instantiate(Rc<Cell<InferTermId>>, Rc<InferTerm>),
 }
 impl Subst {
-    fn new(lhs: InferTermId, rhs: Rc<InferTerm>) -> Self {
-        if let InferTerm::Infer{id} = *rhs { Subst::Eq(lhs, id) }
-        else { Subst::Concrete(lhs, rhs) }
+    fn new(lhs: Rc<Cell<InferTermId>>, rhs: Rc<InferTerm>) -> Self {
+        if let InferTerm::Infer{ref id} = *rhs.clone() { Subst::Eq(lhs, id.clone()) }
+        else { Subst::Instantiate(lhs, rhs) }
     }
 }
 
@@ -379,9 +668,9 @@ pub fn unify(a: Rc<InferTerm>, b: Rc<InferTerm>, ctx: &InferCtx, substs: &mut Ve
     }
 
     match *a.clone() {
-        InferTerm::Infer{id: id_a} => match *b {
-            InferTerm::Infer{id: id_b} if id_a == id_b => (),
-            _ => substs.push( Subst::new(id_a, b.clone()) ),
+        InferTerm::Infer{id: ref id_a} => match *b {
+            InferTerm::Infer{id: ref id_b} if id_a.get() == id_b.get() => (),
+            _ => substs.push( Subst::new(id_a.clone(), b.clone()) ),
         },
         InferTerm::Const(id_a) => match *b {
             InferTerm::Const(id_b) if id_a == id_b => (),

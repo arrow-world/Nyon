@@ -1,7 +1,6 @@
 extern crate diyusi;
 use diyusi::syntax;
 use diyusi::core;
-use diyusi::typechk;
 use std::fs::File;
 use std::io::prelude::*;
 
@@ -19,7 +18,7 @@ fn main(){
     };
 
     for (i, token) in lexed.iter().enumerate() {
-        println!("{}: {:?}", i, token);
+        println!("{}: {:#?}", i, token);
     }
 
     let lexed: Vec<_> = lexed.into_iter().map(|x| x.token).collect();
@@ -27,11 +26,11 @@ fn main(){
     let expr = match syntax::parse_env(&lexed) {
         Ok(x) => x,
         Err(e) => {
-            println!("{:?}", e);
+            println!("{:#?}", e);
             return;
         },
     };
-    println!("{}", expr);
+    println!("{}\n", expr);
 
     let module = syntax::ast::Module {
         env: expr,
@@ -42,11 +41,13 @@ fn main(){
     let (env, scope) = match core::translator::translate_module(module) {
         Ok(x) => x,
         Err(e) => {
-            println!("{:?}", e);
+            println!("translate error: {:#?}", e);
             return;
         }
     };
 
-    println!("env: {:?}", env);
-    println!("scope: {:?}", scope);
+    println!("env: {:#?}\n", env);
+    println!("scope: {:#?}\n", scope);
+
+    println!("{:#?}\n", core::typechk::typechk(env.into()));
 }

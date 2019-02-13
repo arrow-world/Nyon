@@ -14,8 +14,28 @@ mul m n :=
         nat.z => nat.z
         nat.s k => add (mul k n) n
 
-age_of_yjsnpi := mul 6 4
-
 id : |T:type| T -> T
 id _ x := x
 y := id ? $ nat.s nat.z
+
+datatype Bool
+    true: Bool
+    false: Bool
+
+datatype Maybe T
+    none: Maybe
+    some: T -> Maybe
+
+z := Maybe.some (?) y
+
+none m :=
+    case m of
+        Maybe.none T => Bool.true
+        Maybe.some T x => Bool.false
+
+some m :=
+    case m of
+        Maybe.none T => Bool.false 
+        Maybe.some T x => Bool.true
+
+p := none z

@@ -38,3 +38,9 @@ impl From<Env> for typechk::HoledEnv {
         }
     }
 }
+
+enum SpecialType {
+    Nat,
+    Int,
+    Unicode,
+}

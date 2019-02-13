@@ -100,7 +100,7 @@ impl<'s> Module {
     pub fn name(&self) -> &str { &self.name }
 }
 
-pub fn add_child<'s>(parent: &Rc<RefCell<Module>>, name: String) -> Rc<RefCell<Module>> {
+pub fn add_child<'s>(parent: &Rc<RefCell<Module>>, name: String) -> Result<Rc<RefCell<Module>>, ()> {
     let m = Rc::new( RefCell::new(
         Module {
             name: name.clone(),
@@ -110,9 +110,8 @@ pub fn add_child<'s>(parent: &Rc<RefCell<Module>>, name: String) -> Rc<RefCell<M
         }
     ) );
 
-    parent.borrow_mut().children.insert(name, m.clone());
-
-    m
+    parent.borrow_mut().children.insert(name, m.clone())
+        .map( |_| Err(()) ).unwrap_or( Ok(m) )
 }
 
 const PARENT_MODULE : &str = "super";
