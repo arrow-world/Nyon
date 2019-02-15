@@ -92,10 +92,10 @@ fn translate_term(term: ast::TermWithPos, regctx: &mut RegisterCtx) -> Result<Rc
         } ),
         ast::Term::Lam{x, A, t} => Rc::new( core::HoledTerm::Lam(translate_abs(coerce_name(x)?, A, t, regctx)?) ),
         ast::Term::Pi{x, A, B} => Rc::new( core::HoledTerm::Pi(translate_abs(coerce_name(x)?, A, B, regctx)?) ),
-        ast::Term::Arrow{A, B} => Rc::new( core::HoledTerm::Pi( core::typechk::HoledAbs {
-            A: translate_term(A, regctx)?,
-            t: translate_term(B, regctx)?,
-        } ) ),
+        ast::Term::Arrow{A, B} => {
+            // Adds anonymous dummy variable to abstraction context for alignment of De-Bruijn-Indices.
+            Rc::new( core::HoledTerm::Pi(translate_arrow(A, B, regctx)?) )
+        },
         ast::Term::Typing(ast::Typing{x,T}) => {
             let x = translate_term(x, regctx)?;
             let T = translate_term(T, regctx)?;
@@ -222,11 +222,18 @@ fn translate_arm(arm: ast::Arm, regctx: &mut RegisterCtx)
 fn translate_abs(x: String, A: ast::TermWithPos, t: ast::TermWithPos, regctx: &mut RegisterCtx)
     -> Result<typechk::HoledAbs, TranslateErr>
 {
-    regctx.ac_push_temporary( x, |regctx, _| {
-        Ok( core::typechk::HoledAbs {
-            A: translate_term(A, regctx)?,
-            t: translate_term(t, regctx)?,
-        } )
+    Ok( core::typechk::HoledAbs {
+        A: translate_term(A, regctx)?,
+        t: regctx.ac_push_temporary( x, |regctx, _| translate_term(t, regctx) )?,
+    } )
+}
+
+fn translate_arrow(A: ast::TermWithPos, t: ast::TermWithPos, regctx: &mut RegisterCtx)
+    -> Result<typechk::HoledAbs, TranslateErr>
+{
+    Ok( core::typechk::HoledAbs {
+        A: translate_term(A, regctx)?,
+        t: regctx.ac_push_anonymous_temporary( |regctx| translate_term(t, regctx) )?,
     } )
 }
 
@@ -416,6 +423,19 @@ impl RegisterCtx {
 
         b
     }
+
+    fn ac_push_anonymous_temporary<F, B>(&mut self, f: F) -> Result<B, TranslateErr>
+        where F: FnOnce(&mut Self) -> Result<B, TranslateErr>,
+    {
+        self.ac.vars.push("".into());
+
+        let b = f(self);
+
+        self.ac.vars.pop();
+
+        b
+    }
+
 }
 #[derive(Clone)]
 struct CtorInfo {

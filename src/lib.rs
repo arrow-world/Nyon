@@ -8,6 +8,8 @@ extern crate combine;
 extern crate num;
 extern crate unicode_categories;
 
+#[macro_use] extern crate log;
+
 #[cfg(test)]
 mod tests {
 }

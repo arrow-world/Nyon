@@ -1,10 +1,15 @@
 extern crate diyusi;
+extern crate log;
+extern crate env_logger;
+
 use diyusi::syntax;
 use diyusi::core;
 use std::fs::File;
 use std::io::prelude::*;
 
 fn main(){
+    env_logger::init();
+
     let mut source = String::new();
     File::open("test.ner").unwrap().read_to_string(&mut source).unwrap();
     let source = source;

@@ -4,8 +4,8 @@ version = "0.1.0"
 authors = ["Ner"]
 
 [dependencies]
-# rustc-llvm-proxy = "0.1"
-# llvm-sys = { version = "60.2", features = ["no-llvm-linking"] }
 combine = "3.6.3"
 num = "0.2.0"
 unicode_categories = "0.1.1"
+env_logger = "0.6.0"
+log = "0.4.6"

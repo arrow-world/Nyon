@@ -130,6 +130,9 @@ pub enum Value {
 */
 
 pub fn typechk(env: HoledEnv) -> Result<Env, TypeChkErr> {
+    debug!("starting type checking...");
+    debug!("target:\n{}", env);
+
     let mut next_inferterm_id = 0;
     let mut ctx = InferCtx {
         consts: assign_consts(env.consts, &mut next_inferterm_id),
@@ -139,16 +142,27 @@ pub fn typechk(env: HoledEnv) -> Result<Env, TypeChkErr> {
         ).collect(),
     };
 
+    debug!("initial context:\n{}", ctx);
+
     let mut substs: Vec<Subst> = vec![];
     let mut substs_map: HashMap<InferTermId, Rc<InferTerm>> = HashMap::new();
-    loop {
+    for count in 0.. {
+        debug!("iteration {}.", count);
+        debug!("current context: {}", ctx);
+
         typechk_ctx(&ctx, &mut substs, &mut next_inferterm_id)?;
+
+        debug!("collected substitutions:");
+        for subst in &substs {
+            debug!("\t{}", subst);
+        }
 
         while !substs.is_empty() {
             for subst in substs.split_off(0) {
                 match subst {
                     Subst::Eq(mut lhs, mut rhs) => {
                         if rhs > lhs { ::std::mem::swap(&mut lhs, &mut rhs); }
+                        if rhs == lhs { continue; }
                         assert!(lhs > rhs);
 
                         if let Some(instance) = substs_map.remove(&lhs.get()) {
@@ -171,7 +185,20 @@ pub fn typechk(env: HoledEnv) -> Result<Env, TypeChkErr> {
             }
         }
 
+        debug!("substitutions:");
+        for (k,v) in &substs_map {
+            debug!("\t?{} / {}", k, v);
+        }
+        debug!("current context:");
+        debug!("{}\n", ctx);
+
         let subst_result = subst_infers(&mut ctx, &mut substs_map);
+
+        debug!("substitution result:");
+        debug!("found_infer?: {}", subst_result.found_infer);
+        debug!("has_substed?: {}", subst_result.has_substed);
+        debug!("{}\n", ctx);
+
         if !subst_result.found_infer {
             break;
         }
@@ -179,6 +206,9 @@ pub fn typechk(env: HoledEnv) -> Result<Env, TypeChkErr> {
             return Err(TypeChkErr::InferFailure);
         }
     }
+
+    debug!("finished type checking.");
+    debug!("current context:\n{}", ctx);
 
     Ok( cast_no_infer(ctx) )
 }
@@ -188,20 +218,7 @@ fn subst_infers(ctx: &mut InferCtx, substs_map: &mut HashMap<InferTermId, Rc<Inf
 
     let mut result = SubstResult{has_substed: false, found_infer: false};
 
-    for c in &mut ctx.consts {
-        match c.c {
-            InferConst::Def(ref mut t) =>
-                subst_infers_typed_term(t, substs_map, &mut result),
-            InferConst::DataType{ref mut param_types, ref ctors} =>
-                for param_type in param_types {
-                    subst_infers_typed_term(param_type, substs_map, &mut result);
-                },
-            InferConst::Ctor{datatype: _datatype, ref mut param_types} =>
-                param_types.iter_mut().for_each(
-                    |param_type| subst_infers_typed_term(param_type, substs_map, &mut result)
-                ),
-        }
-    }
+    subst_infers_env(&mut ctx.consts, substs_map, &mut result);
 
     for (t,T) in &mut ctx.typings {
         subst_infers_typed_term(t, substs_map, &mut result);
@@ -210,6 +227,24 @@ fn subst_infers(ctx: &mut InferCtx, substs_map: &mut HashMap<InferTermId, Rc<Inf
 
     return result;
 
+    fn subst_infers_env(env: &mut InferEnv, substs: &mut Substs, result: &mut SubstResult) {
+        for c in env {
+            match c.c {
+                InferConst::Def(ref mut t) =>
+                    subst_infers_typed_term(t, substs, result),
+                InferConst::DataType{ref mut param_types, ref ctors} =>
+                    for param_type in param_types {
+                        subst_infers_typed_term(param_type, substs, result);
+                    },
+                InferConst::Ctor{datatype: _datatype, ref mut param_types} =>
+                    param_types.iter_mut().for_each(
+                        |param_type| subst_infers_typed_term(param_type, substs, result)
+                    ),
+            }
+            subst_infers_typed_term(&mut c.type_, substs, result);
+        }
+    }
+
     fn subst_infers_typed_term(t: &mut InferTypedTerm, substs: &mut Substs, result: &mut SubstResult) {
         for term in &mut t.tower {
             subst_infers_term(term, substs, result);
@@ -217,16 +252,39 @@ fn subst_infers(ctx: &mut InferCtx, substs_map: &mut HashMap<InferTermId, Rc<Inf
     }
 
     fn subst_infers_term(t: &mut Rc<InferTerm>, substs: &mut Substs, result: &mut SubstResult) {
-        match *t.clone() {
-            InferTerm::Infer{ref id} => {
-                if let Some(instance) = substs.get(&id.get()) {
-                    *Rc::make_mut(t) = (**instance).clone();
-                    result.has_substed = true;
-                }
-                result.found_infer = true;
-            },
-            _ => (),
+        if let InferTerm::Infer{ref id} = *t.clone() {
+            if let Some(instance) = substs.get(&id.get()) {
+                *Rc::make_mut(t) = (**instance).clone();
+                result.has_substed = true;
+            }
+            result.found_infer = true;
         }
+        else {
+            match *Rc::make_mut(t) {
+                InferTerm::App{ref mut s, ref mut t} => {
+                    subst_infers_typed_term(s, substs, result);
+                    subst_infers_typed_term(t, substs, result);
+                },
+                InferTerm::Lam(ref mut abs) => subst_infers_abs(abs, substs, result),
+                InferTerm::Pi(ref mut abs) => subst_infers_abs(abs, substs, result),
+                InferTerm::Let{ref mut env, ref mut t} => {
+                    subst_infers_env(env, substs, result);
+                    subst_infers_typed_term(t, substs, result);
+                },
+                InferTerm::Case{ref mut t, ref mut cases, ..} => {
+                    subst_infers_typed_term(t, substs, result);
+                    for case in cases {
+                        subst_infers_typed_term(case, substs, result);
+                    }
+                },
+                _ => (),
+            }
+        }
+    }
+
+    fn subst_infers_abs(abs: &mut InferAbs, substs: &mut Substs, result: &mut SubstResult) {
+        subst_infers_typed_term(&mut abs.A, substs, result);
+        subst_infers_typed_term(&mut abs.t, substs, result);
     }
     
     type Substs = HashMap<InferTermId, Rc<InferTerm>>;
@@ -288,6 +346,7 @@ fn cast_no_infer(ctx: InferCtx) -> Env {
             },
             InferTerm::Value(ref v) => Term::Value(v.clone()),
             InferTerm::Infer{..} => unreachable!(),
+            InferTerm::Subst{..} => unreachable!(),
         } )
     }
 
@@ -316,6 +375,7 @@ fn typechk_ctx(ctx: &InferCtx, substs: &mut Vec<Subst>, next_inferterm_id: &mut 
         typechk_term(ctx, t, substs, next_inferterm_id)?;
         typechk_term(ctx, T, substs, next_inferterm_id)?;
 
+        unify(t.tower[1].clone(), T.tower[0].clone(), ctx, substs)?;
         unify(T.tower[1].clone(), Rc::new(InferTerm::Universe), ctx, substs)?;
     }
 
@@ -387,6 +447,9 @@ fn typechk_const (
 fn typechk_term(ctx: &InferCtx, term: &InferTypedTerm, substs: &mut Vec<Subst>, next_inferterm_id: &mut InferTermId)
     -> Result<(), TypeChkErr>
 {
+    debug!("Checks {} ...", term);
+    // debug!("{}", ctx);
+
     match *term.tower[0] {
         InferTerm::Const(const_id) =>
             unify(term.tower[1].clone(), ctx.consts[const_id].type_.tower[0].clone(), ctx, substs)?,
@@ -407,34 +470,41 @@ fn typechk_term(ctx: &InferCtx, term: &InferTypedTerm, substs: &mut Vec<Subst>, 
                 ctx, substs )?;
 
             unify( term.tower[1].clone(),
-                Rc::new( InferTerm::App {
-                    s: InferTypedTerm{tower: vec![T, Rc::new(InferTerm::Universe)]},
-                    t: InferTypedTerm{tower: vec![u.tower[0].clone(), Rc::new(InferTerm::Universe)]},
+                Rc::new( InferTerm::Subst {
+                    t: T,
+                    dbi: 0,
+                    u: u.tower[0].clone(),
                 } ),
                 ctx, substs )?;
         },
         InferTerm::Lam(InferAbs{A: ref T, ref t}) => {
-            typechk_term(ctx, T, substs, next_inferterm_id)?;
-            typechk_term(ctx, t, substs, next_inferterm_id)?;
+            let mut local_ctx = ctx.clone();
+            local_ctx.local.push(T.clone());
 
-            let universe = Rc::new(InferTerm::Universe);
+            typechk_term(ctx, T, substs, next_inferterm_id)?;
+            typechk_term(&local_ctx, t, substs, next_inferterm_id)?;
+
             let U = Rc::new(new_inferterm(next_inferterm_id));
 
-            unify(term.tower[1].clone(), universe, ctx, substs)?;
-            unify(t.tower[1].clone(), U, ctx, substs)?;
+            unify(t.tower[1].clone(), U.clone(), &local_ctx, substs)?;
+
+            let type_ = Rc::new( InferTerm::Pi( InferAbs {
+                A: T.clone(),
+                t: InferTypedTerm{tower: vec![U, Rc::new(InferTerm::Universe)]},
+            } ) );
+            unify(term.tower[1].clone(), type_, ctx, substs)?;
         },
         InferTerm::Pi(InferAbs{A: ref T, t: ref U}) => {
+            let mut local_ctx = ctx.clone();
+            local_ctx.local.push(T.clone());
+
             typechk_term(ctx, T, substs, next_inferterm_id)?;
-            typechk_term(ctx, U, substs, next_inferterm_id)?;
+            typechk_term(&local_ctx, U, substs, next_inferterm_id)?;
 
             let universe = Rc::new(InferTerm::Universe);
 
             unify(T.tower[1].clone(), universe.clone(), ctx, substs)?;
-            {
-                let mut local_ctx = ctx.clone();
-                local_ctx.local.push(T.clone());
-                unify(U.tower[1].clone(), universe.clone(), &local_ctx, substs)?;
-            }
+            unify(U.tower[1].clone(), universe.clone(), &local_ctx, substs)?;
             unify(term.tower[1].clone(), universe, ctx, substs)?;
         },
         InferTerm::Let{ref env, ref t} => {
@@ -492,6 +562,7 @@ fn typechk_term(ctx: &InferCtx, term: &InferTypedTerm, substs: &mut Vec<Subst>, 
                 Value::Str(..) => unimplemented!(),
             }, ctx, substs)?,
         InferTerm::Infer{..} => (),
+        InferTerm::Subst{..} => (),
     }
 
     Ok(())
@@ -603,6 +674,7 @@ pub enum InferTerm {
     Case{t: InferTypedTerm, cases: Vec<InferTypedTerm>, datatype: Option<ConstId>},
     Value(Value),
     Infer{id: Rc<Cell<InferTermId>>},
+    Subst{t: Rc<InferTerm>, dbi: usize, u: Rc<InferTerm>},
 }
 
 #[derive(Clone, Debug)]
@@ -613,8 +685,8 @@ pub struct InferAbs {
 
 #[derive(Clone, Debug)]
 pub struct InferTypedConst {
-    c: InferConst,
-    type_: InferTypedTerm,
+    pub(super) c: InferConst,
+    pub(super) type_: InferTypedTerm,
 }
 
 #[derive(Clone, Debug)]
@@ -624,7 +696,7 @@ pub enum InferConst {
     Ctor{datatype: ConstId, param_types: Vec<InferTypedTerm>},
 }
 
-type InferEnv = Vec<InferTypedConst>;
+pub(super) type InferEnv = Vec<InferTypedConst>;
 
 #[derive(Clone, Debug)]
 pub struct InferCtx {
@@ -640,7 +712,7 @@ impl InferCtx {
 
 #[derive(Clone, Debug)]
 pub struct InferTypedTerm {
-    tower: Vec<Rc<InferTerm>>,
+    pub(super) tower: Vec<Rc<InferTerm>>,
 }
 
 type InferTermId = usize;
@@ -659,9 +731,27 @@ impl Subst {
 
 /*
  * Unify two terms, `a` and `b`, in a context `ctx`.
- * Note that these terms need to be normalized enough.
  */
 pub fn unify(a: Rc<InferTerm>, b: Rc<InferTerm>, ctx: &InferCtx, substs: &mut Vec<Subst>) -> Result<(), UnifyErr> {
+    debug!("Unification in progress... ({} & {})", a, b);
+    // debug!("{}", ctx);
+
+    let mut a = a;
+    if let InferTerm::Subst{ref t, dbi, ref u} = *a.clone() {
+        a = (*t).clone();
+        subst_no_termination_chk(&mut a, dbi, u.clone());
+        debug!("Substituted into {}.", a);
+    }
+    let a = a;
+
+    let mut b = b;
+    if let InferTerm::Subst{ref t, dbi, ref u} = *b.clone() {
+        b = (*t).clone();
+        subst_no_termination_chk(&mut b, dbi, u.clone());
+        debug!("Substituted into {}.", b);
+    }
+    let b = b;
+
     if let InferTerm::Infer{..} = *b {
         if let InferTerm::Infer{..} = *a {}
         else { return unify(b, a, ctx, substs); }
@@ -686,11 +776,11 @@ pub fn unify(a: Rc<InferTerm>, b: Rc<InferTerm>, ctx: &InferCtx, substs: &mut Ve
         },
         InferTerm::App{s: ref s_a, t: ref t_a} => match *b {
             InferTerm::App{s: ref s_b, t: ref t_b} => {
-                unify_typed(s_a.clone(), s_b.clone(), ctx, substs)?;
-                unify_typed(t_a.clone(), t_b.clone(), ctx, substs)?;
+                unify_typed(s_a.clone(), s_b.clone(), ctx, substs).map_err( |e| UnifyErr::InApp(Box::new(e)) )?;
+                unify_typed(t_a.clone(), t_b.clone(), ctx, substs).map_err( |e| UnifyErr::InApp(Box::new(e)) )?;
             },
-            _ => return Err(UnifyErr::TermStructureMismatched),
-        },
+            _ => return Err( UnifyErr::InApp(Box::new(UnifyErr::TermStructureMismatched)) ),
+        }
         InferTerm::Lam(InferAbs{A: ref A_a, t: ref t_a}) => match *b {
             InferTerm::Lam(InferAbs{A: ref A_b, t: ref t_b}) => {
                 unify_typed(A_a.clone(), A_b.clone(), ctx, substs)?;
@@ -705,14 +795,15 @@ pub fn unify(a: Rc<InferTerm>, b: Rc<InferTerm>, ctx: &InferCtx, substs: &mut Ve
             }
             _ => return Err(UnifyErr::TermStructureMismatched),
         },
-        InferTerm::Let{..} => return Err(UnifyErr::TermStructureMismatched),
-        InferTerm::Case{..} => return Err(UnifyErr::TermStructureMismatched),
+        InferTerm::Let{..} => unimplemented!(),
+        InferTerm::Case{..} => unimplemented!(),
         InferTerm::Value(ref v_a) => match *b {
             InferTerm::Value(ref v_b) =>
                 if v_a == v_b {}
                 else { return Err(UnifyErr::ValueMismatched(v_a.clone(), v_b.clone())) },
             _ => return Err(UnifyErr::TermStructureMismatched),
         },
+        InferTerm::Subst{ref t, dbi, ref u} => unreachable!(),
     };
 
     Ok(())
@@ -730,4 +821,64 @@ fn unify_typed(a: InferTypedTerm, b: InferTypedTerm, ctx: &InferCtx, substs: &mu
 pub enum UnifyErr {
     TermStructureMismatched,
     ValueMismatched(Value, Value),
+    InApp(Box<UnifyErr>),
+}
+
+fn subst_no_termination_chk(t: &mut Rc<InferTerm>, dbi: usize, u: Rc<InferTerm>) {
+    if let InferTerm::DBI(i) = *t.clone() {
+        if i == dbi { *Rc::make_mut(t) = (*u).clone(); }
+    }
+    else if let InferTerm::Subst{t: ref m, dbi: dbi_, u: ref n} = *t.clone() {
+        *Rc::make_mut(t) = (**m).clone();
+        subst_no_termination_chk(t, dbi_, n.clone());
+        subst_no_termination_chk(t, dbi, u);
+    }
+    else {
+        match *Rc::make_mut(t) {
+            InferTerm::App{s: ref mut m, t: ref mut n} => {
+                subst_no_termination_chk(&mut m.tower[0], dbi, u.clone());
+                subst_no_termination_chk(&mut n.tower[0], dbi, u);
+            },
+            InferTerm::Lam(ref mut abs) => subst_abs(abs, dbi, u),
+            InferTerm::Pi(ref mut abs) => subst_abs(abs, dbi, u),
+            InferTerm::Let{..} => unimplemented!(),
+            InferTerm::Case{..} => unimplemented!(),
+            _ => (),
+        }
+    }
+
+    return;
+
+    fn subst_abs(abs: &mut InferAbs, dbi: usize, u: Rc<InferTerm>) {
+        subst_no_termination_chk(&mut abs.A.tower[0], dbi, u.clone());
+        subst_no_termination_chk(&mut abs.t.tower[0], dbi+1, u);
+    }
+}
+
+fn shift(t: &mut InferTerm, n: usize) {
+    match t {
+        InferTerm::DBI(ref mut i) => *i += n,
+        InferTerm::App{ref mut s, ref mut t} => {
+            shift_typed(s, n);
+            shift_typed(t, n);
+        },
+        InferTerm::Lam(abs) => shift_abs(abs, n),
+        InferTerm::Pi(abs) => shift_abs(abs, n),
+        InferTerm::Let{..} => unimplemented!(),
+        InferTerm::Case{..} => unimplemented!(),
+        InferTerm::Subst{..} => unimplemented!(),
+        _ => (),
+    }
+
+    return;
+
+    fn shift_abs(abs: &mut InferAbs, n: usize) {
+        shift_typed(&mut abs.A, n);
+        shift_typed(&mut abs.t, n);
+    }
+}
+
+fn shift_typed(t: &mut InferTypedTerm, n: usize) {
+    shift(Rc::make_mut(&mut t.tower[0]), n);
+    shift(Rc::make_mut(&mut t.tower[1]), n);
 }
