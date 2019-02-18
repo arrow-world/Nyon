@@ -1,2 +1,14 @@
-id : |T:type| T -> T
-id _ x := x
+datatype Nat
+    z : Nat
+    s : Nat -> Nat
+
+datatype Bool
+    true : Bool
+    false : Bool
+
+Vec : type -> Nat -> type
+datatype Vec T n
+    nil : Vec
+    cons : (Vec T n) -> T -> Vec
+
+x := Vec.cons (?) (?) (Vec.nil (?) Nat.z) Bool.true

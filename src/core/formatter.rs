@@ -1,4 +1,5 @@
 use super::typechk::*;
+use super::explicit_subst::*;
 use std::fmt;
 
 fn write_indent(f: &mut fmt::Formatter, lvl: usize) -> fmt::Result {
@@ -92,34 +93,34 @@ impl fmt::Display for Value {
     }
 }
 
-impl fmt::Display for InferTerm {
+impl fmt::Display for Expr {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        fn with_indent(self_: &InferTerm, lvl: usize, f: &mut fmt::Formatter) -> fmt::Result {
+        fn with_indent(self_: &Expr, lvl: usize, f: &mut fmt::Formatter) -> fmt::Result {
             write_indent(f, lvl)?;
 
             match self_ {
-                InferTerm::Const(const_id) => write!(f, "#{}", const_id),
-                InferTerm::DBI(i) => write!(f, "@{}", i),
-                InferTerm::Universe => write!(f, "Type"),
-                InferTerm::App{s,t} => write!(f, "({} {})", s, t),
-                InferTerm::Lam(InferAbs{A,t}) => write!(f, "(\\:{} -> {})", A, t),
-                InferTerm::Pi(InferAbs{A,t}) => write!(f, "(|:{}| {})", A, t),
-                InferTerm::Let{env, t} => {
+                Expr::Const(const_id) => write!(f, "#{}", const_id),
+                Expr::DBI(i) => write!(f, "@{}", i),
+                Expr::Universe => write!(f, "Type"),
+                Expr::App{s,t} => write!(f, "({} {})", s, t),
+                Expr::Lam(InferAbs{A,t}) => write!(f, "(\\:{} -> {})", A, t),
+                Expr::Pi(InferAbs{A,t}) => write!(f, "(|:{}| {})", A, t),
+                Expr::Let{env, t} => {
                     writeln!(f, "(let {{")?;
                     fmt_infer_env(env, f, lvl+1)?;
                     write_indent(f, lvl)?; write!(f, "}} in {})", t)
                 },
-                InferTerm::Case{t, cases, datatype} => {
+                Expr::Case{t, cases, datatype} => {
                     writeln!(f, "(case{} {} {{", datatype.map(|i| format!("[#{}]", i)).unwrap_or("".into()), t)?;
                     for case in cases {
                         write_indent(f, lvl+1)?;
                         writeln!(f, "{}", case)?;
                     }
-                    write_indent(f, lvl)?; write!(f, "}})")
+                    write_indent(f, lvl)?; write!(f, "}}")
                 },
-                InferTerm::Value(v) => write!(f, "{}", v),
-                InferTerm::Infer{id} => write!(f, "?{}", id.get()),
-                InferTerm::Subst{t, dbi, u} => write!(f, "{}[{}/{}]", t, dbi, u),
+                Expr::Value(v) => write!(f, "{}", v),
+                Expr::Infer{id} => write!(f, "?{}", id.get()),
+                Expr::Subst(s,e) => write!(f, "[{}]{}", s, e),
             }
         }
 
@@ -189,11 +190,21 @@ impl fmt::Display for InferCtx {
     }
 }
 
+impl fmt::Display for Equal {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            Equal::ToId(id_a, id_b) => write!(f, "?{} = ?{}", id_a.get(), id_b.get()),
+            Equal::Instantiate(id, t) => write!(f, "?{} := {}", id.get(), t),
+            Equal::Defer(e0, e1, _ctx) => write!(f, "{} = {} -| <ctx>", e0, e1),
+        }
+    }
+}
+
 impl fmt::Display for Subst {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            Subst::Eq(id_a, id_b) => write!(f, "?{} = ?{}", id_a.get(), id_b.get()),
-            Subst::Instantiate(id, t) => write!(f, "?{} := {}", id.get(), t),
+            Subst::Shift(n) => write!(f, "↑{}", n),
+            Subst::Dot(e,s) => write!(f, "{}.{}", e, s),
         }
     }
 }

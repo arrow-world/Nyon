@@ -2,6 +2,8 @@ mod modules;
 pub mod translator;
 pub mod typechk;
 pub mod formatter;
+pub mod explicit_subst;
+pub mod unification;
 
 pub use self::typechk::HoledTerm;
 
