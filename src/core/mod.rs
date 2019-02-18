@@ -4,6 +4,7 @@ pub mod typechk;
 pub mod formatter;
 pub mod explicit_subst;
 pub mod unification;
+pub mod serialize;
 
 pub use self::typechk::HoledTerm;
 

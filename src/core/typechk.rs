@@ -1,10 +1,12 @@
-use super::{ConstId, HoleId, SpecialType};
+use super::{ConstId, HoleId};
 use super::unification::*;
 use super::explicit_subst::*;
 
 use std::cell::Cell;
 use std::collections::HashMap;
 use std::rc::Rc;
+
+use serde::{Serialize, Deserialize};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum HoledTerm {
@@ -40,7 +42,7 @@ pub enum HoledConst {
     Ctor{datatype: ConstId, param_types: Vec<Rc<HoledTerm>>},
 }
 
-#[derive(Clone, Debug)]
+#[derive(Serialize, Deserialize, Clone, Debug)]
 pub enum Term {
     Const(ConstId),
     DBI(usize),
@@ -53,33 +55,33 @@ pub enum Term {
     Value(Value),
 }
 
-#[derive(Clone, Debug)]
+#[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct Abs {
     pub A: TypedTerm,
     pub t: TypedTerm,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct TypedTerm {
     tower: Vec<Rc<Term>>,
 }
 
 type Env = Vec<TypedConst>;
 
-#[derive(Clone, Debug)]
+#[derive(Serialize, Deserialize, Clone, Debug)]
 pub enum Const {
     Def(TypedTerm),
     DataType{param_types: Vec<TypedTerm>},
     Ctor{datatype: ConstId, param_types: Vec<TypedTerm>},
 }
 
-#[derive(Clone, Debug)]
+#[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct TypedConst {
     c: Const,
     type_: TypedTerm,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct Ctx {
     pub global: Env,
     pub local: Vec<TypedTerm>,
