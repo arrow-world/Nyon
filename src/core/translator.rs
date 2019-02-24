@@ -77,8 +77,11 @@ fn translate_const(c: UntranslatedConst, id: core::ConstId, regctx: &mut Registe
     } )
 }
 
-fn translate_term(term: ast::TermWithLoc, regctx: &mut RegisterCtx) -> Result<(Rc<core::HoledTerm>, Loc), TranslateErr> {
-    let t = match *term.term {
+fn translate_term(term_withloc: ast::TermWithLoc, regctx: &mut RegisterCtx)
+    -> Result<(Rc<core::HoledTerm>, Loc), TranslateErr>
+{
+    let term = *term_withloc.term.clone();
+    let t = match term {
         ast::Term::Ident(i) => Rc::new(
             regctx.scope.resolve_from_ident(&i)
                 .map(|cid| core::HoledTerm::Const(cid))
@@ -117,9 +120,9 @@ fn translate_term(term: ast::TermWithLoc, regctx: &mut RegisterCtx) -> Result<(R
         },
         ast::Term::Case{t, arms} => {
             let translated_arms: Vec<(CtorInfo, (Rc<typechk::HoledTerm>, Loc))> = arms.into_iter().map( |arm| {
-                let ctor_err = TranslateErr::ExpectedIdentOfCtor(arm.patn.clone());
+                let ctor_err = TranslateErr::ExpectedIdentOfCtor(arm.0.patn.clone());
 
-                let (ctor_cid, body) = translate_arm(arm, regctx)?;
+                let (ctor_cid, body) = translate_arm(arm.0, regctx)?;
                 regctx.ctor_info.get(&ctor_cid).map(|ctor_info| (ctor_info.clone(), body)).ok_or(ctor_err)
             } ).collect::<Result<_,_>>()?;
 
@@ -132,7 +135,7 @@ fn translate_term(term: ast::TermWithLoc, regctx: &mut RegisterCtx) -> Result<(R
                         .collect();
                 if !mismatch_datatype_arms.is_empty() {
                     regctx.errors.push(TranslateErr::MismatchDataType {
-                        expr: term.clone(),
+                        expr: term_withloc.clone(),
                         arms_no: mismatch_datatype_arms,
                     })
                 }
@@ -154,7 +157,7 @@ fn translate_term(term: ast::TermWithLoc, regctx: &mut RegisterCtx) -> Result<(R
             if !duplicated_cases.is_empty() {
                 for (ctor_id, arms_no) in duplicated_cases.into_iter().enumerate() {
                     let ctor = regctx.datatype_info[&datatype.unwrap()].ctors[ctor_id];
-                    regctx.errors.push(TranslateErr::DuplicatedPatterns {expr: term.clone(), ctor, arms_no})
+                    regctx.errors.push(TranslateErr::DuplicatedPatterns {expr: term_withloc.clone(), ctor, arms_no})
                 }
             }
 
@@ -162,7 +165,7 @@ fn translate_term(term: ast::TermWithLoc, regctx: &mut RegisterCtx) -> Result<(R
                 .enumerate().filter(|(_, (case_body,_))| case_body.is_none()).map(|(i,_)| i).collect();
             if !non_exhaustive_cases.is_empty() {
                 regctx.errors.push(TranslateErr::NonExhaustivePatterns {
-                    expr: term,
+                    expr: term_withloc.clone(),
                     ctors: non_exhaustive_cases.clone(),
                 });
             }
@@ -188,7 +191,7 @@ fn translate_term(term: ast::TermWithLoc, regctx: &mut RegisterCtx) -> Result<(R
             }
             else { Rc::new(typechk::HoledTerm::Hole(None)) }
     };
-    Ok(( t, loc(&term) ))
+    Ok(( t, loc(&term_withloc) ))
 }
 
 fn translate_typing(t: UntranslatedTyping, regctx: &mut RegisterCtx)
@@ -253,7 +256,7 @@ fn translate_parametric_term<I, F>(term: ast::TermWithLoc, params: I, regctx: &m
         let hole = Rc::new(typechk::HoledTerm::Hole(None));
         if let Some(param) = params.next() {
             regctx.ac_push_temporary( param, |regctx, _name| Ok( Rc::new(abs_term.clone()(
-                typechk::HoledAbs{A: (hole.clone(), None), t: translate_rest(term, params, regctx, abs_term)?}
+                typechk::HoledAbs{A: (hole.clone(), None), t: translate_rest(term.clone(), params, regctx, abs_term)?}
             )) ) )
                 .map( |t| (t, loc(&term)) )
         }

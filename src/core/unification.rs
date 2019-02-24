@@ -91,12 +91,10 @@ pub(super) fn unify(
     Ok(())
 }
 
-fn unify_typed(a: (InferTypedTerm, Loc), b: (InferTypedTerm, Loc), ctx: &InferCtx, substs: &mut Vec<Equal>)
+fn unify_typed(a: InferTypedTerm, b: InferTypedTerm, ctx: &InferCtx, substs: &mut Vec<Equal>)
     -> Result<(), UnifyErr>
 {
-    unify((a.0.tower[0], a.1), (b.0.tower[0], b.1), ctx, substs)?;
-    unify((a.0.tower[1], None), (b.0.tower[1], None), ctx, substs)?;
-    Ok(())
+    a.tower.into_iter().zip(b.tower).try_for_each( |(a, b)| unify(a, b, ctx, substs) )
 }
 
 fn unify_subst(s: Subst, t: Subst, ctx: &InferCtx, equals: &mut Vec<Equal>) -> Result<(), UnifyErr> {

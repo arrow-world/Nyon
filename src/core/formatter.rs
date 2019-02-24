@@ -120,7 +120,7 @@ impl fmt::Display for Expr {
                 },
                 Expr::Value(v) => write!(f, "{}", v),
                 Expr::Infer{id} => write!(f, "?{}", id.get()),
-                Expr::Subst(s,e) => write!(f, "[{}]{}", s, e),
+                Expr::Subst(s,e) => write!(f, "[{}]{}", s, e.0),
             }
         }
 
@@ -130,7 +130,7 @@ impl fmt::Display for Expr {
 
 impl fmt::Display for InferTypedTerm {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "({}:{})", self.tower[0], self.tower[1])
+        write!(f, "({}:{})", self.tower[0].0, self.tower[1].0)
     }
 }
 
@@ -194,8 +194,8 @@ impl fmt::Display for Equal {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             Equal::ToId(id_a, id_b) => write!(f, "?{} = ?{}", id_a.get(), id_b.get()),
-            Equal::Instantiate(id, t) => write!(f, "?{} := {}", id.get(), t),
-            Equal::Defer(e0, e1, _ctx) => write!(f, "{} = {} -| <ctx>", e0, e1),
+            Equal::Instantiate(id, t) => write!(f, "?{} := {}", id.get(), t.0),
+            Equal::Defer(e0, e1, _ctx) => write!(f, "{} = {} -| <ctx>", e0.0, e1.0),
         }
     }
 }
@@ -204,7 +204,7 @@ impl fmt::Display for Subst {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             Subst::Shift(n) => write!(f, "↑{}", n),
-            Subst::Dot(e,s) => write!(f, "{}.{}", e, s),
+            Subst::Dot(e,s) => write!(f, "{}.{}", e.0, s),
         }
     }
 }

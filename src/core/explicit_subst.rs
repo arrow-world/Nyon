@@ -74,18 +74,16 @@ fn subst_abs(s: Subst, a: &InferAbs) -> InferAbs {
     }
 }
 
-fn subst_typed(s: Subst, e: &(InferTypedTerm, Loc)) -> (InferTypedTerm, Loc) {
-    let (e, loc) = e;
-
-    (InferTypedTerm {
-        tower: vec![subst(s.clone(), (e.tower[0].clone(), None)).0, subst(s, (e.tower[1].clone(), None)).0],
-    }, *loc)
+fn subst_typed(s: Subst, e: &InferTypedTerm) -> InferTypedTerm {
+    InferTypedTerm {
+        tower: vec![subst(s.clone(), e.tower[0].clone()), subst(s, e.tower[1].clone())],
+    }
 }
 
-pub(super) fn subst_typed_lazily(s: Subst, e: (InferTypedTerm, Loc)) -> (InferTypedTerm, Loc) {
-    (InferTypedTerm {
-        tower: e.0.tower.into_iter().map(|e| Rc::new(Expr::Subst(s.clone(), (e, None)))).collect(),
-    }, e.1)
+pub(super) fn subst_typed_lazily(s: Subst, e: InferTypedTerm) -> InferTypedTerm {
+    InferTypedTerm {
+        tower: e.tower.into_iter().map( |e| (Rc::new(Expr::Subst(s.clone(), (e.0, e.1))), e.1) ).collect(),
+    }
 }
 
 /* fn subst(t: &mut Rc<Expr>, dbi: usize, u: Rc<Expr>) {
