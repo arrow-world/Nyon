@@ -1,41 +1,106 @@
-datatype nat
-    z : nat
-    s : nat -> nat
+module nat
+    datatype Nat
+        z : Nat
+        s : Nat -> Nat
 
-add : nat -> nat -> nat
-add m n :=
-    case m of
-        nat.z => n
-        nat.s k => nat.s (add k n)
+    use Nat.*
 
-add : nat -> nat -> nat
-mul m n :=
-    case m of
-        nat.z => nat.z
-        nat.s k => add (mul k n) n
+    add : Nat*Nat -> Nat
+    add(Nat.z, n) := n
+    add(Nat.s(k), n) := Nat.s(add(k,n))
 
-id : |T:type| T -> T
-id _ x := x
-y := id ? $ nat.s nat.z
+    mul : Nat*Nat -> Nat
+    mul(Nat.z, n) := Nat.z
+    mul(Nat.s(k), n) := add(mul(k,n), n)
+
+id[T](x:T) := x
 
 datatype Bool
-    true: Bool
-    false: Bool
+    true
+    false
 
 datatype Maybe T
     none: Maybe
     some: T -> Maybe
 
-z := Maybe.some (?) y
-
-none m :=
+none? m :=
     case m of
         Maybe.none T => Bool.true
         Maybe.some T x => Bool.false
 
-some m :=
+some? m :=
     case m of
         Maybe.none T => Bool.false 
         Maybe.some T x => Bool.true
 
-p := none z
+struct TypeClass
+    types: K -> Type
+    constraints: (|k:K| types k) -> logic.hol.Prop
+
+typeclass Functor f
+    fmap : (a -> b) -> f a -> f b
+where
+    fmap(id) = id
+    fmap(f*g) = fmap(f)*fmap(g)
+
+typeclass Applicative f <= Functor f
+    pure : a -> f a
+    ap : m (a -> b) -> m a -> m b
+where
+    ?
+
+typeclass Monad m <== Applicative m
+    unit : a -> f a
+    infix >>= : m a -> (a -> m b) -> m b
+where
+    (unit x) >>= f   =  f x
+    m >>= unit       =  m
+    (m >>= f) >>= g  =  m >>= (\x -> f x >>= g)
+
+datatype List T
+    nil : List
+    cons : T -> List T -> List T
+
+List.map f: a -> b, xs: List a :=
+    caseof l
+        List.nil => List.nil,
+        List.cons(y, ys) => List.cons(f(y), List.map(f, ys))
+
+impl Functor List(T)
+    fmap := List.map
+
+module state
+    type State S T == struct{current_state: S} -> struct{next_state: S, output: T}
+
+    new[S,T](f: S -> S*T) := State (\x ->
+        let (next_state, output) := f(x.current_state)
+            in {next_state => next_state, output => output}
+    )
+
+    run[S,T](st: State S T, s: S) : T*S :=
+        let y := *st(s) in (y.next_state, y.output)
+
+    eval[S,T](st: State S T, s: S) : T := 
+        let y := *st(s) in y.output
+    
+    exec[S,T](st: State S T, s: S) : S :=
+        let y := *st(s) in y.next_state
+    
+    impl[S] Monad (State S)
+        unit x := State \s -> (x, s)
+        (State h) >>= f :=
+            \s ->
+                let
+                    y := h {current_state => s}
+                    State g := (f y.result)
+                in g y.next_state
+
+module stlc
+    variant Type
+        arrow(Type, Type)
+    
+    variant Term V
+        var(V)
+        lambda(V, Term)
+    
+    beta_reduce: 

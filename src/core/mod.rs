@@ -8,6 +8,7 @@ pub mod serialize;
 
 pub use self::typechk::HoledTerm;
 
+use syntax::{Loc, loc};
 use std::rc::Rc;
 
 pub type ConstId = usize;
@@ -16,8 +17,8 @@ pub type HoleId = usize;
 
 #[derive(Clone, Debug)]
 pub struct Env {
-    pub consts: Vec<Option<typechk::HoledConst>>,
-    pub typings: Vec<Option<(Rc<HoledTerm>, Rc<HoledTerm>)>>,
+    pub consts: Vec<Option<(typechk::HoledConst, Loc)>>,
+    pub typings: Vec<Option<((Rc<HoledTerm>, Loc), (Rc<HoledTerm>, Loc))>>,
 }
 impl Env {
     pub fn extend(&mut self, other: Env) {

@@ -2,6 +2,8 @@ use syntax::ast;
 use core;
 use core::typechk;
 
+use syntax::{Loc, loc};
+
 use std::rc::Rc;
 use std::collections::HashMap;
 
@@ -22,9 +24,9 @@ fn translate_all(regctx: &mut RegisterCtx) -> Result<(), TranslateErr> {
     assert_eq!(regctx.consts.len(), regctx.scope.names().len());
 
     regctx.env.consts.reserve(regctx.consts.len());
-    for c in regctx.consts.split_off(0) {
+    for (c, loc) in regctx.consts.split_off(0) {
         let c = translate_const(c, regctx.env.consts.len(), regctx).map_err(|e| regctx.errors.push(e)).ok();
-        regctx.env.consts.push(c);
+        regctx.env.consts.push(c.map( |c| (c, loc) ));
     }
 
     regctx.env.typings.reserve(regctx.typings.len());
@@ -49,7 +51,7 @@ fn translate_const(c: UntranslatedConst, id: core::ConstId, regctx: &mut Registe
         ),
         UntranslatedConst::DataType{param_names} => {
             typechk::HoledConst::DataType {
-                param_types: vec![Rc::new(typechk::HoledTerm::Hole(None)); param_names.len()],
+                param_types: vec![(Rc::new(typechk::HoledTerm::Hole(None)), None); param_names.len()],
                 ctors: regctx.datatype_info[&id].ctors.clone(),
             }
         },
@@ -61,7 +63,7 @@ fn translate_const(c: UntranslatedConst, id: core::ConstId, regctx: &mut Registe
                     regctx, |abs| typechk::HoledTerm::Pi(abs)
                 )?;
 
-            let (mut param_types, self_) = unfold_pi_chain(translated_type.clone());
+            let (mut param_types, (self_, _self_loc)) = unfold_pi_chain(translated_type.clone());
             if *self_ != typechk::HoledTerm::Const(datatype) {
                 return Err(TranslateErr::ExpectedSelfDatatype(type_));
             }
@@ -75,10 +77,8 @@ fn translate_const(c: UntranslatedConst, id: core::ConstId, regctx: &mut Registe
     } )
 }
 
-fn translate_term(term: ast::TermWithPos, regctx: &mut RegisterCtx) -> Result<Rc<core::HoledTerm>, TranslateErr> {
-    let term_with_pos = term.clone();
-    let term = *term.term;
-    Ok( match term {
+fn translate_term(term: ast::TermWithLoc, regctx: &mut RegisterCtx) -> Result<(Rc<core::HoledTerm>, Loc), TranslateErr> {
+    let t = match *term.term {
         ast::Term::Ident(i) => Rc::new(
             regctx.scope.resolve_from_ident(&i)
                 .map(|cid| core::HoledTerm::Const(cid))
@@ -100,7 +100,9 @@ fn translate_term(term: ast::TermWithPos, regctx: &mut RegisterCtx) -> Result<Rc
             let x = translate_term(x, regctx)?;
             let T = translate_term(T, regctx)?;
             regctx.env.typings.push(Some( (x.clone(), T) ));
-            x
+
+            let (t, _loc) = x;
+            t
         },
         ast::Term::Let{env: letenv, body} => {
             let mut local_regctx =
@@ -114,7 +116,7 @@ fn translate_term(term: ast::TermWithPos, regctx: &mut RegisterCtx) -> Result<Rc
             Rc::new( core::HoledTerm::Let{env: local_regctx.env.into(), t} )
         },
         ast::Term::Case{t, arms} => {
-            let translated_arms: Vec<(CtorInfo, Rc<typechk::HoledTerm>)> = arms.into_iter().map( |arm| {
+            let translated_arms: Vec<(CtorInfo, (Rc<typechk::HoledTerm>, Loc))> = arms.into_iter().map( |arm| {
                 let ctor_err = TranslateErr::ExpectedIdentOfCtor(arm.patn.clone());
 
                 let (ctor_cid, body) = translate_arm(arm, regctx)?;
@@ -130,7 +132,7 @@ fn translate_term(term: ast::TermWithPos, regctx: &mut RegisterCtx) -> Result<Rc
                         .collect();
                 if !mismatch_datatype_arms.is_empty() {
                     regctx.errors.push(TranslateErr::MismatchDataType {
-                        expr: term_with_pos.clone(),
+                        expr: term.clone(),
                         arms_no: mismatch_datatype_arms,
                     })
                 }
@@ -152,7 +154,7 @@ fn translate_term(term: ast::TermWithPos, regctx: &mut RegisterCtx) -> Result<Rc
             if !duplicated_cases.is_empty() {
                 for (ctor_id, arms_no) in duplicated_cases.into_iter().enumerate() {
                     let ctor = regctx.datatype_info[&datatype.unwrap()].ctors[ctor_id];
-                    regctx.errors.push(TranslateErr::DuplicatedPatterns {expr: term_with_pos.clone(), ctor, arms_no})
+                    regctx.errors.push(TranslateErr::DuplicatedPatterns {expr: term.clone(), ctor, arms_no})
                 }
             }
 
@@ -160,12 +162,12 @@ fn translate_term(term: ast::TermWithPos, regctx: &mut RegisterCtx) -> Result<Rc
                 .enumerate().filter(|(_, (case_body,_))| case_body.is_none()).map(|(i,_)| i).collect();
             if !non_exhaustive_cases.is_empty() {
                 regctx.errors.push(TranslateErr::NonExhaustivePatterns {
-                    expr: term_with_pos,
+                    expr: term,
                     ctors: non_exhaustive_cases.clone(),
                 });
             }
 
-            let hole = Rc::new(typechk::HoledTerm::Hole(None));
+            let hole = (Rc::new(typechk::HoledTerm::Hole(None)), None);
 
             Rc::new( core::HoledTerm::Case {
                 t: translate_term(t, regctx)?,
@@ -185,11 +187,12 @@ fn translate_term(term: ast::TermWithPos, regctx: &mut RegisterCtx) -> Result<Rc
                 unimplemented!();
             }
             else { Rc::new(typechk::HoledTerm::Hole(None)) }
-    } )
+    };
+    Ok(( t, loc(&term) ))
 }
 
 fn translate_typing(t: UntranslatedTyping, regctx: &mut RegisterCtx)
-    -> Result<(Rc<typechk::HoledTerm>, Rc<typechk::HoledTerm>), TranslateErr>
+    -> Result<((Rc<core::HoledTerm>, Loc), (Rc<core::HoledTerm>, Loc)), TranslateErr>
 {
     Ok( (
         translate_term(t.typed, regctx)?,
@@ -198,7 +201,7 @@ fn translate_typing(t: UntranslatedTyping, regctx: &mut RegisterCtx)
 }
 
 fn translate_arm(arm: ast::Arm, regctx: &mut RegisterCtx)
-    -> Result<(core::ConstId, Rc<typechk::HoledTerm>), TranslateErr>
+    -> Result<(core::ConstId, (Rc<core::HoledTerm>, Loc)), TranslateErr>
 {
     let (ctor, args) = unfold_app_chain(arm.patn);
 
@@ -219,7 +222,7 @@ fn translate_arm(arm: ast::Arm, regctx: &mut RegisterCtx)
     else { Err(TranslateErr::ExpectedIdent(ctor)) }
 }
 
-fn translate_abs(x: String, A: ast::TermWithPos, t: ast::TermWithPos, regctx: &mut RegisterCtx)
+fn translate_abs(x: String, A: ast::TermWithLoc, t: ast::TermWithLoc, regctx: &mut RegisterCtx)
     -> Result<typechk::HoledAbs, TranslateErr>
 {
     Ok( core::typechk::HoledAbs {
@@ -228,7 +231,7 @@ fn translate_abs(x: String, A: ast::TermWithPos, t: ast::TermWithPos, regctx: &m
     } )
 }
 
-fn translate_arrow(A: ast::TermWithPos, t: ast::TermWithPos, regctx: &mut RegisterCtx)
+fn translate_arrow(A: ast::TermWithLoc, t: ast::TermWithLoc, regctx: &mut RegisterCtx)
     -> Result<typechk::HoledAbs, TranslateErr>
 {
     Ok( core::typechk::HoledAbs {
@@ -237,21 +240,22 @@ fn translate_arrow(A: ast::TermWithPos, t: ast::TermWithPos, regctx: &mut Regist
     } )
 }
 
-fn translate_parametric_term<I, F>(term: ast::TermWithPos, params: I, regctx: &mut RegisterCtx, abs_term: F)
-    -> Result<Rc<typechk::HoledTerm>, TranslateErr>
+fn translate_parametric_term<I, F>(term: ast::TermWithLoc, params: I, regctx: &mut RegisterCtx, abs_term: F)
+    -> Result<(Rc<typechk::HoledTerm>, Loc), TranslateErr>
     where I: DoubleEndedIterator<Item = String>,
           F: Fn(typechk::HoledAbs) -> typechk::HoledTerm + Clone,
 {
-    fn translate_rest<I,F>(term: ast::TermWithPos, mut params: I, regctx: &mut RegisterCtx, abs_term: F)
-        -> Result<Rc<typechk::HoledTerm>, TranslateErr>
+    fn translate_rest<I,F>(term: ast::TermWithLoc, mut params: I, regctx: &mut RegisterCtx, abs_term: F)
+        -> Result<(Rc<typechk::HoledTerm>, Loc), TranslateErr>
         where I: Iterator<Item = String>,
             F: Fn(typechk::HoledAbs) -> typechk::HoledTerm + Clone,
     {
         let hole = Rc::new(typechk::HoledTerm::Hole(None));
         if let Some(param) = params.next() {
             regctx.ac_push_temporary( param, |regctx, _name| Ok( Rc::new(abs_term.clone()(
-                typechk::HoledAbs{A: hole.clone(), t: translate_rest(term, params, regctx, abs_term)?}
+                typechk::HoledAbs{A: (hole.clone(), None), t: translate_rest(term, params, regctx, abs_term)?}
             )) ) )
+                .map( |t| (t, loc(&term)) )
         }
         else { translate_term(term, regctx) }
     }
@@ -279,14 +283,17 @@ fn translate_literal(lit: ast::Lit, regctx: &mut RegisterCtx) -> Result<Rc<typec
         ast::Lit::Int(i) => Rc::new( typechk::HoledTerm::Value(typechk::Value::Int(i)) ),
         ast::Lit::Str(s) => Rc::new( typechk::HoledTerm::Value(typechk::Value::Str(s)) ),
         ast::Lit::Tuple(ts) => {
-            let cons = Rc::new(typechk::HoledTerm::Const( regctx.scope.resolve(iter::once("Tuple"), "Cons").unwrap() ));
+            let cons = (
+                Rc::new(typechk::HoledTerm::Const( regctx.scope.resolve(iter::once("Tuple"), "Cons").unwrap() )),
+                None,
+            );
             let nil = Rc::new(typechk::HoledTerm::Const( regctx.scope.resolve(iter::once("Tuple"), "Nil").unwrap() ));
 
             ts.into_iter().try_fold( nil, |t, head| -> Result<_, TranslateErr> {
                 Ok(Rc::new(
                     typechk::HoledTerm::App{
-                        s: Rc::new( typechk::HoledTerm::App{s: cons.clone(), t: translate_term(head, regctx)? } ),
-                        t: t
+                        s: (Rc::new( typechk::HoledTerm::App{s: cons.clone(), t: translate_term(head, regctx)? } ), None),
+                        t: (t, None),
                     }
                 ))
             } )?
@@ -311,14 +318,14 @@ fn register_env(regctx: &mut RegisterCtx, ast_env: ast::Env) -> Result<(), Trans
     assert_eq!(regctx.consts.len(), regctx.scope.next_cid());
 
     let ast::Env(statements) = ast_env;
-    for statement in statements {
+    for (statement, loc) in statements {
         match statement {
             ast::Statement::Datatype{header, ctors} => {
                 let (name, param_names) = coerce_name_with_params(header)?;
 
                 let datatype_cid =
                     register_const( regctx, iter::empty(), name.clone(),
-                        UntranslatedConst::DataType{param_names: param_names.clone()} )?;
+                        UntranslatedConst::DataType{param_names: param_names.clone()}, loc )?;
 
                 core::modules::add_child(&regctx.scope.module(), name.clone())
                     .map_err(|_| TranslateErr::ConflictedDatatype)?;
@@ -332,8 +339,8 @@ fn register_env(regctx: &mut RegisterCtx, ast_env: ast::Env) -> Result<(), Trans
                             else { return Err(TranslateErr::ExpectedTyping(ctor)); };
 
                         let ctor_cid =
-                            register_const(regctx, iter::once(name.clone()), ctor_name?,
-                                UntranslatedConst::Ctor{datatype: datatype_cid, type_: ctor_type})?;
+                            register_const( regctx, iter::once(name.clone()), ctor_name?,
+                                UntranslatedConst::Ctor{datatype: datatype_cid, type_: ctor_type}, loc )?;
                         
                         regctx.ctor_info.insert(ctor_cid, CtorInfo{datatype: datatype_cid, ctor_id});
 
@@ -344,7 +351,7 @@ fn register_env(regctx: &mut RegisterCtx, ast_env: ast::Env) -> Result<(), Trans
             }
             ast::Statement::Def(lhs,rhs) => {
                 let (name, param_names) = coerce_name_with_params(lhs)?;
-                register_const( regctx, iter::empty(), name, UntranslatedConst::Def{param_names, rhs} )?;
+                register_const( regctx, iter::empty(), name, UntranslatedConst::Def{param_names, rhs}, loc )?;
             }
             ast::Statement::Typing(ast::Typing{x,T}) =>
                 regctx.typings.push(UntranslatedTyping{typed: x, type_: T}),
@@ -357,7 +364,7 @@ fn register_env(regctx: &mut RegisterCtx, ast_env: ast::Env) -> Result<(), Trans
 fn register_const<Q: IntoIterator<Item=String> + Clone>(
     regctx: &mut RegisterCtx,
     qualifier: Q, identifier: String,
-    c: UntranslatedConst,
+    c: UntranslatedConst, loc: Loc
 )
     -> Result<core::ConstId, TranslateErr>
 {
@@ -365,12 +372,12 @@ fn register_const<Q: IntoIterator<Item=String> + Clone>(
     assert_eq!(cid - regctx.scope.base_cid(), regctx.consts.len());
 
     Rc::make_mut(&mut regctx.scope).register_const(qualifier, identifier);
-    regctx.consts.push(c);
+    regctx.consts.push((c, loc));
 
     Ok(cid)
 }
 
-fn coerce_name_with_params(term: ast::TermWithPos) -> Result<(String, Vec<String>), TranslateErr> {
+fn coerce_name_with_params(term: ast::TermWithLoc) -> Result<(String, Vec<String>), TranslateErr> {
     let (name, params) = unfold_app_chain(term.clone());
 
     if let ast::Term::Ident(ident) = *name.term {
@@ -381,7 +388,7 @@ fn coerce_name_with_params(term: ast::TermWithPos) -> Result<(String, Vec<String
     else { Err(TranslateErr::ExpectedIdent(term)) }
 }
 
-fn coerce_ident(term: ast::TermWithPos) -> Result<ast::Ident, TranslateErr> {
+fn coerce_ident(term: ast::TermWithLoc) -> Result<ast::Ident, TranslateErr> {
     if let ast::Term::Ident(i) = *term.term { Ok(i) }
     else { Err(TranslateErr::ExpectedIdent(term)) }
 }
@@ -390,7 +397,7 @@ fn coerce_ident(term: ast::TermWithPos) -> Result<ast::Ident, TranslateErr> {
 struct RegisterCtx {
     env: core::Env,
     scope: Rc<core::modules::Scope>,
-    consts: Vec<UntranslatedConst>,
+    consts: Vec<(UntranslatedConst, Loc)>,
     typings: Vec<UntranslatedTyping>,
     ac: AbsCtx,
     ctor_info: HashMap<core::ConstId, CtorInfo>,
@@ -450,37 +457,37 @@ struct DataTypeInfo {
 
 #[derive(Clone)]
 enum UntranslatedConst {
-    Def{param_names: Vec<String>, rhs: ast::TermWithPos},
+    Def{param_names: Vec<String>, rhs: ast::TermWithLoc},
     DataType{param_names: Vec<String>},
-    Ctor{datatype: core::ConstId, type_: ast::TermWithPos},
+    Ctor{datatype: core::ConstId, type_: ast::TermWithLoc},
     // PrimitiveCtor{datatype: core::ConstId, type_: ast::Term},
 }
 
 #[derive(Clone)]
 struct UntranslatedTyping {
-    typed: ast::TermWithPos,
-    type_: ast::TermWithPos,
+    typed: ast::TermWithLoc,
+    type_: ast::TermWithLoc,
 }
 
 #[derive(Clone, Debug)]
 pub enum TranslateErr {
     CantSpecifyNamespace(ast::Ident),
-    InvalidDefLhs(ast::TermWithPos),
-    InvalidDefLhsParam(ast::TermWithPos),
+    InvalidDefLhs(ast::TermWithLoc),
+    InvalidDefLhsParam(ast::TermWithLoc),
     UndefinedIdent(ast::Ident),
     UndefinedModule(ast::Ident),
     AmbiguousIdent(ast::Ident),
     ConflictedVar(String),
-    ExpectedIdent(ast::TermWithPos),
-    ExpectedIdentOfCtor(ast::TermWithPos),
-    ExpectedIdentAtArgsOfCtor(ast::TermWithPos),
-    ExpectedTyping(ast::TermWithPos),
-    InvalidDataTypeParam(ast::TermWithPos),
-    MismatchDataType{expr: ast::TermWithPos, arms_no: Vec<usize>},
-    DuplicatedPatterns{expr: ast::TermWithPos, arms_no: Vec<usize>, ctor: core::ConstId},
-    NonExhaustivePatterns{expr: ast::TermWithPos, ctors: Vec<core::CtorId>},
+    ExpectedIdent(ast::TermWithLoc),
+    ExpectedIdentOfCtor(ast::TermWithLoc),
+    ExpectedIdentAtArgsOfCtor(ast::TermWithLoc),
+    ExpectedTyping(ast::TermWithLoc),
+    InvalidDataTypeParam(ast::TermWithLoc),
+    MismatchDataType{expr: ast::TermWithLoc, arms_no: Vec<usize>},
+    DuplicatedPatterns{expr: ast::TermWithLoc, arms_no: Vec<usize>, ctor: core::ConstId},
+    NonExhaustivePatterns{expr: ast::TermWithLoc, ctors: Vec<core::CtorId>},
     ConflictedDatatype,
-    ExpectedSelfDatatype(ast::TermWithPos),
+    ExpectedSelfDatatype(ast::TermWithLoc),
 }
 impl From<CoerceNameErr> for TranslateErr {
     fn from(e: CoerceNameErr) -> Self {
@@ -490,7 +497,7 @@ impl From<CoerceNameErr> for TranslateErr {
     }
 }
 
-fn unfold_app_chain(app_chain: ast::TermWithPos) -> (ast::TermWithPos, Vec<ast::TermWithPos>) {
+fn unfold_app_chain(app_chain: ast::TermWithLoc) -> (ast::TermWithLoc, Vec<ast::TermWithLoc>) {
     let mut list = Vec::new();
 
     let mut rest = app_chain;
@@ -505,11 +512,13 @@ fn unfold_app_chain(app_chain: ast::TermWithPos) -> (ast::TermWithPos, Vec<ast::
     (rest, list)
 }
 
-fn unfold_pi_chain(pi_chain: Rc<typechk::HoledTerm>) -> (Vec<Rc<typechk::HoledTerm>>, Rc<typechk::HoledTerm>) {
+fn unfold_pi_chain(pi_chain: (Rc<typechk::HoledTerm>, Loc))
+    -> (Vec<(Rc<typechk::HoledTerm>, Loc)>, (Rc<typechk::HoledTerm>, Loc))
+{
     let mut list = Vec::new();
 
     let mut rest = pi_chain;
-    while let typechk::HoledTerm::Pi(typechk::HoledAbs{A: ref T, t: ref U}) = *rest.clone() {
+    while let typechk::HoledTerm::Pi(typechk::HoledAbs{A: ref T, t: ref U}) = *rest.0.clone() {
         list.push(T.clone());
         rest = U.clone();
     }

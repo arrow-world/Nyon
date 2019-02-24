@@ -18,19 +18,19 @@ impl fmt::Display for HoledTerm {
                 HoledTerm::Const(const_id) => write!(f, "#{}", const_id),
                 HoledTerm::DBI(i) => write!(f, "@{}", i),
                 HoledTerm::Universe => write!(f, "Type"),
-                HoledTerm::App{s,t} => write!(f, "{} {}", s, t),
-                HoledTerm::Lam(HoledAbs{A,t}) => write!(f, "(\\:{} -> {})", A, t),
-                HoledTerm::Pi(HoledAbs{A,t}) => write!(f, "(|:{}| {})", A, t),
+                HoledTerm::App{s,t} => write!(f, "{} {}", s.0, t.0),
+                HoledTerm::Lam(HoledAbs{A,t}) => write!(f, "(\\:{} -> {})", A.0, t.0),
+                HoledTerm::Pi(HoledAbs{A,t}) => write!(f, "(|:{}| {})", A.0, t.0),
                 HoledTerm::Let{env, t} => {
                     writeln!(f, "let {{")?;
                     env.fmt_with_indent(f, lvl+1)?;
-                    write_indent(f, lvl)?; write!(f, "}} in ({})", t)
+                    write_indent(f, lvl)?; write!(f, "}} in ({})", t.0)
                 },
                 HoledTerm::Case{t, cases, datatype} => {
-                    writeln!(f, "case{} {} {{", datatype.map(|i| format!("[#{}]", i)).unwrap_or("".into()), t)?;
+                    writeln!(f, "case{} {} {{", datatype.map(|i| format!("[#{}]", i)).unwrap_or("".into()), t.0)?;
                     for case in cases {
                         write_indent(f, lvl+1)?;
-                        writeln!(f, "{}", case)?;
+                        writeln!(f, "{}", case.0)?;
                     }
                     write_indent(f, lvl)?; write!(f, "}}")
                 },
@@ -45,20 +45,20 @@ impl fmt::Display for HoledTerm {
 
 impl HoledEnv {
     fn fmt_with_indent(&self, f: &mut fmt::Formatter, lvl: usize) -> fmt::Result {
-        for (id, c) in self.consts.iter().enumerate() {
+        for (id, (c, loc)) in self.consts.iter().enumerate() {
             write_indent(f, lvl)?;
             match c {
-                HoledConst::Def(t) => writeln!(f, "#{} := {}", id, t)?,
+                HoledConst::Def((t, _loc)) => writeln!(f, "#{} := {}", id, t)?,
                 HoledConst::DataType{param_types, ..} => {
                     write!(f, "datatype #{}", id)?;
-                    for param_type in param_types {
+                    for (param_type, loc) in param_types {
                         write!(f, " @:{}", param_type)?;
                     }
                     writeln!(f, " {{ ... }}")?
                 },
                 HoledConst::Ctor{datatype, param_types} => {
                     write!(f, "#{}.#{}", datatype, id)?;
-                    for param_type in param_types {
+                    for (param_type, loc) in param_types {
                         write!(f, " @:{}", param_type)?;
                     }
                     writeln!(f, "")?
@@ -69,7 +69,7 @@ impl HoledEnv {
 
         for (t,T) in &self.typings {
             write_indent(f, lvl)?;
-            writeln!(f, "{} : {}", t, T)?;
+            writeln!(f, "{} : {}", t.0, T.0)?;
         }
 
         write_indent(f, lvl)?;

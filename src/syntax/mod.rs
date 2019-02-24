@@ -5,6 +5,25 @@ mod parser;
 pub use self::lexer::lex_src;
 pub use self::parser::parse_env;
 
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+pub struct SourceLocation {
+    pub start: usize,
+    pub end: usize,
+}
+
+pub type Loc = Option<SourceLocation>;
+
+pub fn loc(t: &ast::TermWithLoc) -> Loc {
+    Some( SourceLocation {
+        start: t.start,
+        end: t.end,
+    } )
+}
+
+pub fn loc_range(start: usize, end: usize) -> Loc {
+    Some( SourceLocation { start, end } )
+}
+
 /* #[derive(Clone, PartialEq, Eq)]
 pub enum Error {
     Lex(LexError),

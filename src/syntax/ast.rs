@@ -1,18 +1,19 @@
+use syntax::Loc;
 use std::fmt;
 
 #[derive(Clone, Debug)]
 pub enum Term {
     Ident(Ident),
     Universe,
-    App{f: TermWithPos, x: TermWithPos},
-    Pi{x: Ident, A: TermWithPos, B: TermWithPos},
-    Arrow{A: TermWithPos, B: TermWithPos},
+    App{f: TermWithLoc, x: TermWithLoc},
+    Pi{x: Ident, A: TermWithLoc, B: TermWithLoc},
+    Arrow{A: TermWithLoc, B: TermWithLoc},
     // Infix(Infix),
     Typing(Typing),
-    Let{env: Env, body: TermWithPos},
-    Lam{x: Ident, A: TermWithPos, t: TermWithPos},
-    Case{t: TermWithPos, arms: Vec<Arm>},
-    If{p: TermWithPos, tv: TermWithPos, fv: TermWithPos},
+    Let{env: Env, body: TermWithLoc},
+    Lam{x: Ident, A: TermWithLoc, t: TermWithLoc},
+    Case{t: TermWithLoc, arms: Vec<(Arm, Loc)>},
+    If{p: TermWithLoc, tv: TermWithLoc, fv: TermWithLoc},
     Lit(Lit),
     Hole(Option<Ident>),
 }
@@ -31,7 +32,7 @@ impl fmt::Display for Term {
             Term::Case{t, arms} => {
                 write!(f, "(case {} of ", t)?;
                 for i in 0..arms.len() {
-                    write!(f, "{}", arms[i])?;
+                    write!(f, "{}", arms[i].0)?;
                     if i < arms.len()-1 { write!(f, "; ")?; }
                 }
                 write!(f, ")")
@@ -44,12 +45,12 @@ impl fmt::Display for Term {
 }
 
 #[derive(Clone, Debug)]
-pub struct TermWithPos {
+pub struct TermWithLoc {
     pub term: Box<Term>,
     pub start: usize,
     pub end: usize,
 }
-impl fmt::Display for TermWithPos {
+impl fmt::Display for TermWithLoc {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "{:}", self.term)
     }
@@ -74,8 +75,8 @@ pub struct Op(pub String);
 
 #[derive(Clone, Debug)]
 pub struct Infix {
-    pub head: TermWithPos,
-    pub tail: Vec<(Op, TermWithPos)>,
+    pub head: TermWithLoc,
+    pub tail: Vec<(Op, TermWithLoc)>,
 }
 impl fmt::Display for Infix {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
@@ -89,8 +90,8 @@ impl fmt::Display for Infix {
 
 #[derive(Clone, Debug)]
 pub struct Arm {
-    pub patn: TermWithPos,
-    pub t: TermWithPos,
+    pub patn: TermWithLoc,
+    pub t: TermWithLoc,
 }
 impl fmt::Display for Arm {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
@@ -100,8 +101,8 @@ impl fmt::Display for Arm {
 
 #[derive(Clone, Debug)]
 pub struct Typing {
-    pub x: TermWithPos,
-    pub T: TermWithPos,
+    pub x: TermWithLoc,
+    pub T: TermWithLoc,
 }
 impl fmt::Display for Typing {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
@@ -114,7 +115,7 @@ pub enum Lit {
     Nat(::num::BigInt),
     Int(::num::BigInt),
     Str(String),
-    Tuple(Vec<TermWithPos>),
+    Tuple(Vec<TermWithLoc>),
 }
 impl fmt::Display for Lit {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
@@ -135,12 +136,12 @@ impl fmt::Display for Lit {
 }
 
 #[derive(Clone, Debug)]
-pub struct Env(pub Vec<Statement>);
+pub struct Env(pub Vec<(Statement, Loc)>);
 impl fmt::Display for Env {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         let Env(stats) = self;
         for i in 0..stats.len() {
-            write!(f, "{}", stats[i])?;
+            write!(f, "{}", stats[i].0)?;
             if i < stats.len()-1 { write!(f, "; ")?; }
         }
         Ok(())
@@ -156,10 +157,10 @@ pub struct Module {
 
 #[derive(Clone, Debug)]
 pub enum Statement {
-    Datatype{header: TermWithPos, ctors: Vec<TermWithPos>},
+    Datatype{header: TermWithLoc, ctors: Vec<TermWithLoc>},
     // DefInfix{op: Op, name: Ident},
     // InfixPrio{head: Ident, tail: Vec<Ident>},
-    Def(TermWithPos, TermWithPos),
+    Def(TermWithLoc, TermWithLoc),
     Typing(Typing),
 }
 impl fmt::Display for Statement {
