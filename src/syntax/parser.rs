@@ -279,12 +279,15 @@ fn lit<I>(indent_lvl: i64) -> impl Parser<Input = I, Output = ast::Lit>
 }
 
 fn ident<I>() -> impl Parser<Input = I, Output = ast::Ident>
-    where I: Stream<Item = lexer::Token>,
+    where I: Stream<Item = lexer::Token, Position = usize>,
           I::Error: ParseError<I::Item, I::Range, I::Position>,
 {
     let lex = || satisfy_map(|t| if let lexer::Token::Ident(s) = t {Some(s)} else {None});
-    many(attempt( lex().skip(token(lexer::Token::Op(lexer::Op::Dot))) )).and(lex())
-        .map(|(dns, name)| ast::Ident{domain: dns, name})
+    (
+        position(),
+        many(attempt( lex().skip(token(lexer::Token::Op(lexer::Op::Dot))) )).and(lex()),
+        position(),
+    ).map(|(start, (dns, name), end)| ast::Ident{domain: dns, name, loc: loc_range(start, end)})
 }
 
 fn indent<I>() -> impl Parser<Input = I, Output = i64> 

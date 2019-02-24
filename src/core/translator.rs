@@ -2,10 +2,14 @@ use syntax::ast;
 use core;
 use core::typechk;
 
+use core::errors::TranslateErr as TranslateErrWithoutLoc;
+
 use syntax::{Loc, loc};
 
 use std::rc::Rc;
 use std::collections::HashMap;
+
+type TranslateErr = (TranslateErrWithoutLoc, Loc);
 
 pub fn translate_module<'a>(ast: ast::Module) -> Result<(core::Env, Rc<core::modules::Scope>), Vec<TranslateErr>> {
     let mut regctx = RegisterCtx::new(core::modules::Scope::top());
@@ -65,7 +69,7 @@ fn translate_const(c: UntranslatedConst, id: core::ConstId, regctx: &mut Registe
 
             let (mut param_types, (self_, _self_loc)) = unfold_pi_chain(translated_type.clone());
             if *self_ != typechk::HoledTerm::Const(datatype) {
-                return Err(TranslateErr::ExpectedSelfDatatype(type_));
+                return Err((TranslateErrWithoutLoc::ExpectedSelfDatatype, loc(&type_)));
             }
 
             assert!(param_types.len() >= datatype_param_names.len());
@@ -81,12 +85,14 @@ fn translate_term(term_withloc: ast::TermWithLoc, regctx: &mut RegisterCtx)
     -> Result<(Rc<core::HoledTerm>, Loc), TranslateErr>
 {
     let term = *term_withloc.term.clone();
+    let l = loc(&term_withloc);
+
     let t = match term {
         ast::Term::Ident(i) => Rc::new(
             regctx.scope.resolve_from_ident(&i)
                 .map(|cid| core::HoledTerm::Const(cid))
                 .or_else(|| regctx.ac.dbi(&i.name).map(|dbi| core::HoledTerm::DBI(dbi)))
-                .ok_or(TranslateErr::UndefinedIdent(i))?
+                .ok_or((TranslateErrWithoutLoc::UndefinedIdent(i), l))?
         ),
         ast::Term::Universe => Rc::new( core::HoledTerm::Universe ),
         ast::Term::App{f,x} => Rc::new( core::HoledTerm::App {
@@ -120,7 +126,7 @@ fn translate_term(term_withloc: ast::TermWithLoc, regctx: &mut RegisterCtx)
         },
         ast::Term::Case{t, arms} => {
             let translated_arms: Vec<(CtorInfo, (Rc<typechk::HoledTerm>, Loc))> = arms.into_iter().map( |arm| {
-                let ctor_err = TranslateErr::ExpectedIdentOfCtor(arm.0.patn.clone());
+                let ctor_err = (TranslateErrWithoutLoc::ExpectedIdentOfCtor, loc(&arm.0.patn));
 
                 let (ctor_cid, body) = translate_arm(arm.0, regctx)?;
                 regctx.ctor_info.get(&ctor_cid).map(|ctor_info| (ctor_info.clone(), body)).ok_or(ctor_err)
@@ -134,19 +140,20 @@ fn translate_term(term_withloc: ast::TermWithLoc, regctx: &mut RegisterCtx)
                         .filter(|(_, (ctor_info,_))| ctor_info.datatype != datatype).map(|(arm_no, _)| arm_no)
                         .collect();
                 if !mismatch_datatype_arms.is_empty() {
-                    regctx.errors.push(TranslateErr::MismatchDataType {
-                        expr: term_withloc.clone(),
-                        arms_no: mismatch_datatype_arms,
-                    })
+                    regctx.errors.extend(
+                        mismatch_datatype_arms.into_iter().map( |arm_no| 
+                            (TranslateErrWithoutLoc::MismatchDataType{arm_no}, (translated_arms[arm_no].1).1.clone())
+                        )
+                    );
                 }
             }
 
             let mut cases = vec![ (None, vec![]);
                 datatype.map(|datatype| regctx.datatype_info[&datatype].ctors.len()).unwrap_or(0)];
-            for (arm_no, (ctor_info, body)) in translated_arms.into_iter().enumerate() {
+            for (arm_no, (ctor_info, body)) in translated_arms.iter().enumerate() {
                 let (ref mut case_body, ref mut arms_no) = cases[ctor_info.ctor_id];
                 if case_body.is_none() {
-                    *case_body = Some(body);
+                    *case_body = Some(body.clone());
                 }
                 arms_no.push(arm_no);
             }
@@ -157,17 +164,25 @@ fn translate_term(term_withloc: ast::TermWithLoc, regctx: &mut RegisterCtx)
             if !duplicated_cases.is_empty() {
                 for (ctor_id, arms_no) in duplicated_cases.into_iter().enumerate() {
                     let ctor = regctx.datatype_info[&datatype.unwrap()].ctors[ctor_id];
-                    regctx.errors.push(TranslateErr::DuplicatedPatterns {expr: term_withloc.clone(), ctor, arms_no})
+                    let err_loc =
+                        arms_no.iter().map(|arm_no| (translated_arms[*arm_no].1).1.clone().unwrap())
+                            .flatten().collect();
+                    regctx.errors.push((
+                        TranslateErrWithoutLoc::DuplicatedPatterns{ctor, arms_no},
+                        Some(err_loc),
+                    ));
                 }
             }
 
             let non_exhaustive_cases: Vec<_> = cases.iter()
                 .enumerate().filter(|(_, (case_body,_))| case_body.is_none()).map(|(i,_)| i).collect();
             if !non_exhaustive_cases.is_empty() {
-                regctx.errors.push(TranslateErr::NonExhaustivePatterns {
-                    expr: term_withloc.clone(),
-                    ctors: non_exhaustive_cases.clone(),
-                });
+                regctx.errors.extend(
+                    non_exhaustive_cases.into_iter().map( |ctor| (
+                        TranslateErrWithoutLoc::NonExhaustivePattern{ctor},
+                        l.clone(),
+                    ) )
+                );
             }
 
             let hole = (Rc::new(typechk::HoledTerm::Hole(None)), None);
@@ -212,7 +227,7 @@ fn translate_arm(arm: ast::Arm, regctx: &mut RegisterCtx)
         if let Some(ctor_id) = regctx.scope.resolve_from_ident(&ident) {
             let args = args.into_iter().map( |arg| {
                 if let ast::Term::Ident(ident) = *arg.term { Ok(coerce_name(ident)?) }
-                else { Err(TranslateErr::ExpectedIdentAtArgsOfCtor(arg)) }
+                else { Err((TranslateErrWithoutLoc::ExpectedIdentAtArgsOfCtor, loc(&arg))) }
             } ).collect::<Result<Vec<_>,_>>()?;
 
             let rhs = arm.t;
@@ -220,12 +235,12 @@ fn translate_arm(arm: ast::Arm, regctx: &mut RegisterCtx)
 
             Ok(( ctor_id, t ))
         }
-        else { Err(TranslateErr::UndefinedIdent(ident)) }
+        else { Err((TranslateErrWithoutLoc::UndefinedIdent(ident.clone()), ident.loc)) }
     }
-    else { Err(TranslateErr::ExpectedIdent(ctor)) }
+    else { Err((TranslateErrWithoutLoc::ExpectedIdent, loc(&ctor))) }
 }
 
-fn translate_abs(x: String, A: ast::TermWithLoc, t: ast::TermWithLoc, regctx: &mut RegisterCtx)
+fn translate_abs(x: (String, Loc), A: ast::TermWithLoc, t: ast::TermWithLoc, regctx: &mut RegisterCtx)
     -> Result<typechk::HoledAbs, TranslateErr>
 {
     Ok( core::typechk::HoledAbs {
@@ -245,12 +260,12 @@ fn translate_arrow(A: ast::TermWithLoc, t: ast::TermWithLoc, regctx: &mut Regist
 
 fn translate_parametric_term<I, F>(term: ast::TermWithLoc, params: I, regctx: &mut RegisterCtx, abs_term: F)
     -> Result<(Rc<typechk::HoledTerm>, Loc), TranslateErr>
-    where I: DoubleEndedIterator<Item = String>,
+    where I: DoubleEndedIterator<Item = (String, Loc)>,
           F: Fn(typechk::HoledAbs) -> typechk::HoledTerm + Clone,
 {
     fn translate_rest<I,F>(term: ast::TermWithLoc, mut params: I, regctx: &mut RegisterCtx, abs_term: F)
         -> Result<(Rc<typechk::HoledTerm>, Loc), TranslateErr>
-        where I: Iterator<Item = String>,
+        where I: Iterator<Item = (String, Loc)>,
             F: Fn(typechk::HoledAbs) -> typechk::HoledTerm + Clone,
     {
         let hole = Rc::new(typechk::HoledTerm::Hole(None));
@@ -321,17 +336,17 @@ fn register_env(regctx: &mut RegisterCtx, ast_env: ast::Env) -> Result<(), Trans
     assert_eq!(regctx.consts.len(), regctx.scope.next_cid());
 
     let ast::Env(statements) = ast_env;
-    for (statement, loc) in statements {
+    for (statement, l) in statements {
         match statement {
             ast::Statement::Datatype{header, ctors} => {
                 let (name, param_names) = coerce_name_with_params(header)?;
 
                 let datatype_cid =
-                    register_const( regctx, iter::empty(), name.clone(),
-                        UntranslatedConst::DataType{param_names: param_names.clone()}, loc )?;
+                    register_const( regctx, iter::empty(), name.0.clone(),
+                        UntranslatedConst::DataType{param_names: param_names.clone()}, l.clone() )?;
 
-                core::modules::add_child(&regctx.scope.module(), name.clone())
-                    .map_err(|_| TranslateErr::ConflictedDatatype)?;
+                core::modules::add_child(&regctx.scope.module(), name.0.clone())
+                    .map_err( |_| (TranslateErrWithoutLoc::ConflictedDatatypeName(name.0.clone()), name.1.clone()) )?;
 
                 let ctors_id: Vec<core::ConstId> =
                     ctors.into_iter().enumerate().map( |(ctor_id, ctor)| {
@@ -339,11 +354,11 @@ fn register_env(regctx: &mut RegisterCtx, ast_env: ast::Env) -> Result<(), Trans
                             if let ast::Term::Typing(typing) = *ctor.term {
                                 (coerce_ident(typing.x).and_then(|i| coerce_name(i).map_err(|e| e.into())), typing.T)
                             }
-                            else { return Err(TranslateErr::ExpectedTyping(ctor)); };
+                            else { return Err((TranslateErrWithoutLoc::ExpectedTyping, loc(&ctor))); };
 
                         let ctor_cid =
-                            register_const( regctx, iter::once(name.clone()), ctor_name?,
-                                UntranslatedConst::Ctor{datatype: datatype_cid, type_: ctor_type}, loc )?;
+                            register_const( regctx, iter::once(name.0.clone()), ctor_name?.0,
+                                UntranslatedConst::Ctor{datatype: datatype_cid, type_: ctor_type}, l.clone() )?;
                         
                         regctx.ctor_info.insert(ctor_cid, CtorInfo{datatype: datatype_cid, ctor_id});
 
@@ -354,7 +369,7 @@ fn register_env(regctx: &mut RegisterCtx, ast_env: ast::Env) -> Result<(), Trans
             }
             ast::Statement::Def(lhs,rhs) => {
                 let (name, param_names) = coerce_name_with_params(lhs)?;
-                register_const( regctx, iter::empty(), name, UntranslatedConst::Def{param_names, rhs}, loc )?;
+                register_const( regctx, iter::empty(), name.0, UntranslatedConst::Def{param_names, rhs}, l )?;
             }
             ast::Statement::Typing(ast::Typing{x,T}) =>
                 regctx.typings.push(UntranslatedTyping{typed: x, type_: T}),
@@ -380,7 +395,7 @@ fn register_const<Q: IntoIterator<Item=String> + Clone>(
     Ok(cid)
 }
 
-fn coerce_name_with_params(term: ast::TermWithLoc) -> Result<(String, Vec<String>), TranslateErr> {
+fn coerce_name_with_params(term: ast::TermWithLoc) -> Result<((String, Loc), Vec<(String, Loc)>), TranslateErr> {
     let (name, params) = unfold_app_chain(term.clone());
 
     if let ast::Term::Ident(ident) = *name.term {
@@ -388,12 +403,12 @@ fn coerce_name_with_params(term: ast::TermWithLoc) -> Result<(String, Vec<String
             .collect::<Result<_,_>>()
             .and_then( |param_names| Ok((coerce_name(ident)?, param_names)) )
     }
-    else { Err(TranslateErr::ExpectedIdent(term)) }
+    else { Err((TranslateErrWithoutLoc::ExpectedIdent, loc(&term))) }
 }
 
 fn coerce_ident(term: ast::TermWithLoc) -> Result<ast::Ident, TranslateErr> {
     if let ast::Term::Ident(i) = *term.term { Ok(i) }
-    else { Err(TranslateErr::ExpectedIdent(term)) }
+    else { Err((TranslateErrWithoutLoc::ExpectedIdent, loc(&term))) }
 }
 
 #[derive(Clone)]
@@ -421,10 +436,14 @@ impl RegisterCtx {
         }
     }
 
-    fn ac_push_temporary<F, B>(&mut self, name: String, f: F) -> Result<B, TranslateErr>
+    fn ac_push_temporary<F, B>(&mut self, name: (String, Loc), f: F) -> Result<B, TranslateErr>
         where F: FnOnce(&mut Self, String) -> Result<B, TranslateErr>,
     {
-        if self.ac.vars.iter().any(|var| *var == name) { return Err(TranslateErr::ConflictedVar(name)); }
+        let (name, name_loc) = name;
+
+        if self.ac.vars.iter().any(|var| *var == name) {
+            return Err((TranslateErrWithoutLoc::ConflictedVar(name), name_loc));
+        }
         self.ac.vars.push(name.clone());
 
         let b = f(self, name);
@@ -455,13 +474,13 @@ struct CtorInfo {
 #[derive(Clone)]
 struct DataTypeInfo {
     ctors: Vec<core::ConstId>,
-    params: Vec<String>,
+    params: Vec<(String, Loc)>,
 }
 
 #[derive(Clone)]
 enum UntranslatedConst {
-    Def{param_names: Vec<String>, rhs: ast::TermWithLoc},
-    DataType{param_names: Vec<String>},
+    Def{param_names: Vec<(String, Loc)>, rhs: ast::TermWithLoc},
+    DataType{param_names: Vec<(String, Loc)>},
     Ctor{datatype: core::ConstId, type_: ast::TermWithLoc},
     // PrimitiveCtor{datatype: core::ConstId, type_: ast::Term},
 }
@@ -470,34 +489,6 @@ enum UntranslatedConst {
 struct UntranslatedTyping {
     typed: ast::TermWithLoc,
     type_: ast::TermWithLoc,
-}
-
-#[derive(Clone, Debug)]
-pub enum TranslateErr {
-    CantSpecifyNamespace(ast::Ident),
-    InvalidDefLhs(ast::TermWithLoc),
-    InvalidDefLhsParam(ast::TermWithLoc),
-    UndefinedIdent(ast::Ident),
-    UndefinedModule(ast::Ident),
-    AmbiguousIdent(ast::Ident),
-    ConflictedVar(String),
-    ExpectedIdent(ast::TermWithLoc),
-    ExpectedIdentOfCtor(ast::TermWithLoc),
-    ExpectedIdentAtArgsOfCtor(ast::TermWithLoc),
-    ExpectedTyping(ast::TermWithLoc),
-    InvalidDataTypeParam(ast::TermWithLoc),
-    MismatchDataType{expr: ast::TermWithLoc, arms_no: Vec<usize>},
-    DuplicatedPatterns{expr: ast::TermWithLoc, arms_no: Vec<usize>, ctor: core::ConstId},
-    NonExhaustivePatterns{expr: ast::TermWithLoc, ctors: Vec<core::CtorId>},
-    ConflictedDatatype,
-    ExpectedSelfDatatype(ast::TermWithLoc),
-}
-impl From<CoerceNameErr> for TranslateErr {
-    fn from(e: CoerceNameErr) -> Self {
-        match e {
-            CoerceNameErr::CantSpecifyNamespace(i) => TranslateErr::CantSpecifyNamespace(i),
-        }
-    }
 }
 
 fn unfold_app_chain(app_chain: ast::TermWithLoc) -> (ast::TermWithLoc, Vec<ast::TermWithLoc>) {
@@ -529,10 +520,7 @@ fn unfold_pi_chain(pi_chain: (Rc<typechk::HoledTerm>, Loc))
     (list, rest)
 }
 
-fn coerce_name(ident: ast::Ident) -> Result<String, CoerceNameErr> {
-    if !ident.domain.is_empty() { Err(CoerceNameErr::CantSpecifyNamespace(ident)) }
-    else { Ok(ident.name) }
-}
-enum CoerceNameErr {
-    CantSpecifyNamespace(ast::Ident),
+fn coerce_name(ident: ast::Ident) -> Result<(String, Loc), TranslateErr> {
+    if !ident.domain.is_empty() { Err((TranslateErrWithoutLoc::CantSpecifyNamespace(ident.clone()), ident.loc)) }
+    else { Ok((ident.name, ident.loc)) }
 }

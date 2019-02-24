@@ -75,6 +75,14 @@ impl Name {
         Name{qualifier: Vec::new(), identifier}
     }
 }
+impl ::std::fmt::Display for Name {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
+        for qualifier in &self.qualifier {
+            write!(f, "{}.", qualifier)?;
+        }
+        write!(f, "{}", self.identifier)
+    }
+}
 
 #[derive(Clone, Debug)]
 pub struct Module {

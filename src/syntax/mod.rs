@@ -5,23 +5,23 @@ mod parser;
 pub use self::lexer::lex_src;
 pub use self::parser::parse_env;
 
-#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct SourceLocation {
     pub start: usize,
     pub end: usize,
 }
 
-pub type Loc = Option<SourceLocation>;
+pub type Loc = Option<Vec<SourceLocation>>;
 
 pub fn loc(t: &ast::TermWithLoc) -> Loc {
-    Some( SourceLocation {
+    Some( vec![ SourceLocation {
         start: t.start,
         end: t.end,
-    } )
+    } ] )
 }
 
 pub fn loc_range(start: usize, end: usize) -> Loc {
-    Some( SourceLocation { start, end } )
+    Some( vec![ SourceLocation { start, end } ] )
 }
 
 /* #[derive(Clone, PartialEq, Eq)]

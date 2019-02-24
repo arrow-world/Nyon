@@ -5,6 +5,7 @@ pub mod formatter;
 pub mod explicit_subst;
 pub mod unification;
 pub mod serialize;
+pub mod errors;
 
 pub use self::typechk::HoledTerm;
 

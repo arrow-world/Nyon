@@ -82,7 +82,7 @@ fn subst_typed(s: Subst, e: &InferTypedTerm) -> InferTypedTerm {
 
 pub(super) fn subst_typed_lazily(s: Subst, e: InferTypedTerm) -> InferTypedTerm {
     InferTypedTerm {
-        tower: e.tower.into_iter().map( |e| (Rc::new(Expr::Subst(s.clone(), (e.0, e.1))), e.1) ).collect(),
+        tower: e.tower.into_iter().map( |e| (Rc::new(Expr::Subst(s.clone(), (e.0, e.1.clone()))), e.1) ).collect(),
     }
 }
 

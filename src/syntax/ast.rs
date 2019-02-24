@@ -60,6 +60,7 @@ impl fmt::Display for TermWithLoc {
 pub struct Ident {
     pub domain: Vec<String>,
     pub name: String,
+    pub loc: Loc,
 }
 impl fmt::Display for Ident {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {

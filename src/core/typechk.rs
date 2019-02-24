@@ -291,8 +291,8 @@ fn subst_infers(
     fn subst_infers_term(t: &mut (Rc<Expr>, Loc), substs: &mut Substs, result: &mut SubstResult) {
         if let Expr::Infer{ref id} = *t.0.clone() {
             if let Some(instance) = substs.get(&id.get()) {
-                *Rc::make_mut(&mut t.0) = (*instance.0).clone();
-                t.1 = instance.1;
+                *Rc::make_mut(&mut t.0) = (*(instance.0)).clone();
+                t.1 = instance.1.clone();
                 result.has_substed = true;
             }
             result.found_infer = true;
