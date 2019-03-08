@@ -13,9 +13,9 @@ pub enum HoledTerm {
     Const(ConstId),
     DBI(u64),
     Universe,
-    App{s: (Rc<HoledTerm>, Loc), t: (Rc<HoledTerm>, Loc)},
-    Lam(HoledAbs),
-    Pi(HoledAbs),
+    App{s: (Rc<HoledTerm>, Loc), t: (Rc<HoledTerm>, Loc), implicit: bool},
+    Lam(HoledAbs, bool),
+    Pi(HoledAbs, bool),
     Let{env: HoledEnv, t: (Rc<HoledTerm>, Loc)},
     Case{t: (Rc<HoledTerm>, Loc), cases: Vec<(Rc<HoledTerm>, Loc)>, datatype: Option<ConstId>},
     Hole(Option<HoleId>),
@@ -47,9 +47,9 @@ pub enum Term {
     Const(ConstId),
     DBI(usize),
     Universe,
-    App{s: TypedTerm, t: TypedTerm},
-    Lam(Abs),
-    Pi(Abs),
+    App{s: TypedTerm, t: TypedTerm, implicit: bool},
+    Lam(Abs, bool),
+    Pi(Abs, bool),
     Let{env: Env, t: TypedTerm},
     Case{t: TypedTerm, cases: Vec<TypedTerm>},
     Value(Value),
@@ -97,6 +97,7 @@ pub enum Value {
 
 /*
     - Typing rules -
+        * referencing Calculus of Inductive Constructions.
 
     W-Empty
         => WF([])[]
@@ -197,7 +198,7 @@ pub fn typechk(env: HoledEnv) -> Result<Env, TypeChkErr> {
             debug!("\t?{} / {}", k, v.0);
         }
         debug!("deferred unifications:");
-        for (e0,e1,ctx) in &defers {
+        for (e0, e1, _ctx) in &defers {
             debug!("\t{} = {}", e0.0, e1.0);
         }
         debug!("current context:");
@@ -299,12 +300,12 @@ fn subst_infers(
         }
         else {
             match *Rc::make_mut(&mut t.0) {
-                Expr::App{ref mut s, ref mut t} => {
+                Expr::App{ref mut s, ref mut t, ..} => {
                     subst_infers_typed_term(s, substs, result);
                     subst_infers_typed_term(t, substs, result);
                 },
-                Expr::Lam(ref mut abs) => subst_infers_abs(abs, substs, result),
-                Expr::Pi(ref mut abs) => subst_infers_abs(abs, substs, result),
+                Expr::Lam(ref mut abs, ..) => subst_infers_abs(abs, substs, result),
+                Expr::Pi(ref mut abs, ..) => subst_infers_abs(abs, substs, result),
                 Expr::Let{ref mut env, ref mut t} => {
                     subst_infers_env(env, substs, result);
                     subst_infers_typed_term(t, substs, result);
@@ -385,12 +386,13 @@ fn cast_no_infer(ctx: InferCtx) -> Env {
             Expr::Const(const_id) => Term::Const(const_id),
             Expr::DBI(i) => Term::DBI(i),
             Expr::Universe => Term::Universe,
-            Expr::App{ref s, ref t} => Term::App {
+            Expr::App{ref s, ref t, implicit} => Term::App {
                 s: cast_no_infer_typed_term(s.clone()),
                 t: cast_no_infer_typed_term(t.clone()),
+                implicit,
             },
-            Expr::Lam(ref abs) => Term::Lam(cast_no_infer_abs(abs.clone())),
-            Expr::Pi(ref abs) => Term::Pi(cast_no_infer_abs(abs.clone())),
+            Expr::Lam(ref abs, implicit) => Term::Lam(cast_no_infer_abs(abs.clone()), implicit),
+            Expr::Pi(ref abs, implicit) => Term::Pi(cast_no_infer_abs(abs.clone()), implicit),
             Expr::Let{ref env, ref t} => Term::Let {
                 env: cast_no_infer_env(env.clone()),
                 t: cast_no_infer_typed_term(t.clone()),
@@ -466,7 +468,7 @@ fn typechk_const (
                     Rc::new( Expr::Pi( InferAbs {
                         A: param_type.clone(),
                         t: InferTypedTerm{tower: vec![U, universe.clone()]},
-                    } ) ),
+                    }, false ) ),
                     None,
                 )
             );
@@ -496,6 +498,7 @@ fn typechk_const (
                                     (Rc::new(Expr::DBI(param_types.len() + dbi_offset)), None),
                                     (Rc::new(new_inferterm(next_inferterm_id)), None),
                                 ] },
+                                implicit: true,
                             } ),
                             None,
                         )
@@ -692,8 +695,9 @@ fn assign_term(term: (Rc<HoledTerm>, Loc), inferterm_id: &mut InferTermId) -> In
                 HoledTerm::Const(ref id) => Expr::Const(*id),
                 HoledTerm::DBI(ref i) => Expr::DBI(*i as usize),
                 HoledTerm::Universe => Expr::Universe,
-                HoledTerm::App{ref s, ref t} =>
-                    Expr::App{s: assign_term(s.clone(), inferterm_id), t: assign_term(t.clone(), inferterm_id)},
+                HoledTerm::App{ref s, ref t, is_implicit} =>
+                    Expr::App{s: assign_term(s.clone(), inferterm_id), t: assign_term(t.clone(), inferterm_id),
+                        is_implicit},
                 HoledTerm::Lam(ref abs) => Expr::Lam(assign_abs(abs.clone(), inferterm_id)),
                 HoledTerm::Pi(ref abs) => Expr::Pi(assign_abs(abs.clone(), inferterm_id)),
                 HoledTerm::Let{ref env, ref t} => {
@@ -744,13 +748,14 @@ pub(super) enum Expr {
     Const(ConstId),
     DBI(usize),
     Universe,
-    App{s: InferTypedTerm, t: InferTypedTerm},
-    Lam(InferAbs),
-    Pi(InferAbs),
+    App{s: InferTypedTerm, t: InferTypedTerm, implicit: bool},
+    Lam(InferAbs, bool),
+    Pi(InferAbs, bool),
     Let{env: InferEnv, t: InferTypedTerm},
     Case{t: InferTypedTerm, cases: Vec<InferTypedTerm>, datatype: Option<ConstId>},
     Value(Value),
     Infer{id: Rc<Cell<InferTermId>>},
+    InferPi{head: InferAbs, end: InferAbs, id: Rc<Cell<InferPiId>>},
     Subst(Subst, (Rc<Expr>, Loc)),
 }
 
@@ -794,6 +799,7 @@ pub struct InferTypedTerm {
 }
 
 type InferTermId = usize;
+type InferPiId = usize;
 
 #[derive(Clone, Debug)]
 pub(super) enum Equal {
