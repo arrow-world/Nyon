@@ -1,5 +1,6 @@
 #![allow(non_snake_case)]
 #![recursion_limit = "2048"]
+#![type_length_limit="2097152"]
 
 pub mod syntax;
 pub mod core;

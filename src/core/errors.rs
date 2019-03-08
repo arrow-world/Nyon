@@ -16,6 +16,7 @@ pub enum TranslateErr {
     NonExhaustivePattern{ctor: core::CtorId},
     ConflictedDatatypeName(String),
     ExpectedSelfDatatype,
+    RegLocalEnvErr(Vec<(TranslateErr, Loc)>),
 }
 impl TranslateErr {
     pub fn message(&self/*, scope: &Scope*/) -> String {
@@ -32,6 +33,7 @@ impl TranslateErr {
             TranslateErr::NonExhaustivePattern{ctor} => format!("constructor `{}` not covered", *ctor/*scope.names()[*ctor]*/),
             TranslateErr::ConflictedDatatypeName(name) => format!("conflicted datatype name `{}`", name),
             TranslateErr::ExpectedSelfDatatype => format!("expected self datatype"),
+            TranslateErr::RegLocalEnvErr(errs) => format!("local environment registering failed: {:#?}", errs),
         }
     }
 }

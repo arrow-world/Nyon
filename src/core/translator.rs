@@ -12,17 +12,19 @@ use std::collections::HashMap;
 
 pub(crate) type TranslateErr = (TranslateErrWithoutLoc, Loc);
 
-pub fn translate_module<'a>(ast: ast::Module) -> Result<(core::Env, Rc<core::modules::Scope>), Vec<TranslateErr>> {
+pub fn translate_module<'a>(ast: ast::Module) -> (Option<core::Env>, Rc<core::modules::Scope>, Vec<TranslateErr>) {
     let mut regctx = RegisterCtx::new(core::modules::Scope::top());
 
-    register_module(&mut regctx, ast).map_err(|x| vec![x])?;
+    register_module(&mut regctx, ast);
+    if ! regctx.errors.is_empty() {
+        return (None, regctx.scope, regctx.errors);
+    }
 
     translate_all(&mut regctx).unwrap_or_else(|e| {
         regctx.errors.push(e);
     });
 
-    if regctx.errors.is_empty() { Ok((regctx.env, regctx.scope)) }
-    else { Err(regctx.errors) }
+    (Some(regctx.env), regctx.scope, regctx.errors)
 }
 
 fn translate_all(regctx: &mut RegisterCtx) -> Result<(), TranslateErr> {
@@ -96,12 +98,12 @@ pub(crate) fn translate_term(term_withloc: ast::TermWithLoc, regctx: &mut Regist
                 .ok_or((TranslateErrWithoutLoc::UndefinedIdent(i), l))?
         ),
         ast::Term::Universe => Rc::new( core::HoledTerm::Universe ),
-        ast::Term::App{f,x} => Rc::new( core::HoledTerm::App {
+        ast::Term::AppChain{f, args} => unimplemented!()/*Rc::new( core::HoledTerm::App {
             s: translate_term(f, regctx)?,
             t: translate_term(x, regctx)?,
-        } ),
+        } )*/,
         ast::Term::Lam{x, A, t} => Rc::new( core::HoledTerm::Lam(translate_abs(coerce_name(x)?, A, t, regctx)?) ),
-        ast::Term::Pi{x, A, B} => Rc::new( core::HoledTerm::Pi(translate_abs(coerce_name(x)?, A, B, regctx)?) ),
+        ast::Term::Pi{x, A, B, implicit} => Rc::new( core::HoledTerm::Pi(translate_abs(coerce_name(x)?, A, B, regctx)?) ),
         ast::Term::Arrow{A, B} => {
             // Adds anonymous dummy variable to abstraction context for alignment of De-Bruijn-Indices.
             Rc::new( core::HoledTerm::Pi(translate_arrow(A, B, regctx)?) )
@@ -118,7 +120,10 @@ pub(crate) fn translate_term(term_withloc: ast::TermWithLoc, regctx: &mut Regist
             let mut local_regctx =
                 RegisterCtx::new(core::modules::Scope::new(regctx.scope.module(), regctx.scope.clone()));
 
-            register_env(&mut local_regctx, letenv)?;
+            register_env(&mut local_regctx, letenv);
+            if !local_regctx.errors.is_empty() {
+                return Err((TranslateErrWithoutLoc::RegLocalEnvErr(local_regctx.errors), None));
+            }
             let t = translate_term(body, &mut local_regctx)?;
 
             translate_all(&mut local_regctx)?;
@@ -294,63 +299,67 @@ impl AbsCtx {
     }
 }
 
-fn register_module(regctx: &mut RegisterCtx, ast_module: ast::Module) -> Result<(), TranslateErr>
-{
-    register_env(regctx, ast_module.env)?;
+fn register_module(regctx: &mut RegisterCtx, ast_module: ast::Module) {
+    register_env(regctx, ast_module.env);
 
     for child in ast_module.children {
-        register_module(regctx, *child)?;
+        register_module(regctx, *child);
     }
-
-    Ok(())
 }
 
-fn register_env(regctx: &mut RegisterCtx, ast_env: ast::Env) -> Result<(), TranslateErr> {
-    use std::iter;
-
+fn register_env(regctx: &mut RegisterCtx, ast_env: ast::Env) {
     assert_eq!(regctx.consts.len(), regctx.scope.next_cid());
 
     let ast::Env(statements) = ast_env;
     for (statement, l) in statements {
-        match statement {
-            ast::Statement::Datatype{header, ctors} => {
-                let (name, param_names) = coerce_name_with_params(header)?;
-
-                let datatype_cid =
-                    register_const( regctx, iter::empty(), name.0.clone(),
-                        UntranslatedConst::DataType{param_names: param_names.clone()}, l.clone() )?;
-
-                core::modules::add_child(&regctx.scope.module(), name.0.clone())
-                    .map_err( |_| (TranslateErrWithoutLoc::ConflictedDatatypeName(name.0.clone()), name.1.clone()) )?;
-
-                let ctors_id: Vec<core::ConstId> =
-                    ctors.into_iter().enumerate().map( |(ctor_id, ctor)| {
-                        let (ctor_name, ctor_type) =
-                            if let ast::Term::Typing(typing) = *ctor.term {
-                                (coerce_ident(typing.x).and_then(|i| coerce_name(i).map_err(|e| e.into())), typing.T)
-                            }
-                            else { return Err((TranslateErrWithoutLoc::ExpectedTyping, loc(&ctor))); };
-
-                        let ctor_cid =
-                            register_const( regctx, iter::once(name.0.clone()), ctor_name?.0,
-                                UntranslatedConst::Ctor{datatype: datatype_cid, type_: ctor_type}, l.clone() )?;
-                        
-                        regctx.ctor_info.insert(ctor_cid, CtorInfo{datatype: datatype_cid, ctor_id});
-
-                        Ok( ctor_cid )
-                    } ).collect::<Result<_,TranslateErr>>()?;
-
-                regctx.datatype_info.insert(datatype_cid, DataTypeInfo{ctors: ctors_id, params: param_names});
-            }
-            ast::Statement::Def(lhs,rhs) => {
-                let (name, param_names) = coerce_name_with_params(lhs)?;
-                register_const( regctx, iter::empty(), name.0, UntranslatedConst::Def{param_names, rhs}, l )?;
-            }
-            ast::Statement::Typing(ast::Typing{x,T}) =>
-                regctx.typings.push(UntranslatedTyping{typed: x, type_: T}),
-        }
+        let result = register_statement(regctx, statement, l);
+        regctx.errors.extend( result.err() );
     }
-    
+}
+
+fn register_statement(regctx: &mut RegisterCtx, statement: ast::Statement, l: Loc)
+    -> Result<(), TranslateErr>
+{
+    use std::iter;
+
+    match statement {
+        ast::Statement::Datatype{header, ctors} => {
+            let (name, param_names) = coerce_name_with_params(header)?;
+
+            let datatype_cid =
+                register_const( regctx, iter::empty(), name.0.clone(),
+                    UntranslatedConst::DataType{param_names: param_names.clone()}, l.clone() )?;
+
+            core::modules::add_child(&regctx.scope.module(), name.0.clone())
+                .map_err( |_| (TranslateErrWithoutLoc::ConflictedDatatypeName(name.0.clone()), name.1.clone()) )?;
+
+            let ctors_id: Vec<core::ConstId> =
+                ctors.into_iter().enumerate().map( |(ctor_id, ctor)| {
+                    let (ctor_name, ctor_type) =
+                        if let ast::Term::Typing(typing) = *ctor.term {
+                            (coerce_ident(typing.x).and_then(|i| coerce_name(i).map_err(|e| e.into())), typing.T)
+                        }
+                        else { return Err((TranslateErrWithoutLoc::ExpectedTyping, loc(&ctor))); };
+
+                    let ctor_cid =
+                        register_const( regctx, iter::once(name.0.clone()), ctor_name?.0,
+                            UntranslatedConst::Ctor{datatype: datatype_cid, type_: ctor_type}, l.clone() )?;
+                    
+                    regctx.ctor_info.insert(ctor_cid, CtorInfo{datatype: datatype_cid, ctor_id});
+
+                    Ok( ctor_cid )
+                } ).collect::<Result<_,TranslateErr>>()?;
+
+            regctx.datatype_info.insert(datatype_cid, DataTypeInfo{ctors: ctors_id, params: param_names});
+        }
+        ast::Statement::Def(lhs,rhs) => {
+            let (name, param_names) = coerce_name_with_params(lhs)?;
+            register_const( regctx, iter::empty(), name.0, UntranslatedConst::Def{param_names, rhs}, l )?;
+        }
+        ast::Statement::Typing(ast::Typing{x,T}) =>
+            regctx.typings.push(UntranslatedTyping{typed: x, type_: T}),
+    };
+
     Ok(())
 }
 
@@ -471,11 +480,13 @@ fn unfold_app_chain(app_chain: ast::TermWithLoc) -> (ast::TermWithLoc, Vec<ast::
 
     let mut rest = app_chain;
     let mut rest_term = *rest.term;
-    while let ast::Term::App{f,x} = rest_term {
-        list.push(x);
+    while let ast::Term::AppChain{f, args} = rest_term {
+        list.push(args);
         rest = f;
         rest_term = *rest.term;
     }
+
+    let list = list.into_iter().rev().flatten().map(|(t,_)| t).collect();
 
     rest.term = Box::new(rest_term);
     (rest, list)

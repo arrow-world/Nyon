@@ -43,18 +43,33 @@ fn main(){
         children: Vec::new(),
     };
 
-    let (env, scope) = match core::translator::translate_module(module) {
-        Ok(x) => x,
-        Err(es) => {
-            for (e, locs) in es {
-                println!("translate error: {} at {:?}", e.message(), locs);
-            }
-            return;
+    let (env, scope, errors) = core::translator::translate_module(module);
+
+    let show_errors = || {
+        for (e, locs) in &errors {
+            println!("\terror: {} at {:?}", e.message(), locs);
         }
     };
 
-    println!("env: {:#?}\n", env);
     println!("scope: {:#?}\n", scope);
+
+    let env =
+        if let Some(env) = env {
+            println!("namespace registration successful");
+            println!("env: {:#?}\n", env);
+            env
+        }
+        else {
+            println!("namespace registration failure");
+            show_errors();
+            return;
+        };
+    
+    if !errors.is_empty() {
+        println!("environment translation failure");
+        show_errors();
+        return;
+    }
 
     println!("{:#?}\n", core::typechk::typechk(env.into()));
 }

@@ -1,59 +1,18 @@
 data List {a}
-    nil
-    cons a*List{a}
+    nil : List{a}
+    cons : a -> List{a} -> List{a}
 
 lnil := List.nil
 lcons := List.cons : {a:Type} -> a -> List{a} -> List{a}
 
 at {a} (n: Nat) (xs: List{a}) : Option{a} :=
-    case xs
-        lcons y ys => case n
+    case xs of
+        lcons y ys => case n of
             0 => some y,
             _ => self.at (n-1) ys
         lnil => none
 
-map {a b} (f: a->b) (xs: List{a}) : List{b} :=
-    case xs
+map {a} {b} (f: a->b) (xs: List{a}) : List{b} :=
+    case xs of
         lnil => lnil,
         lcons y ys => lcons (f y) (self.map f ys)
-
-tcons {a,as} (x: a, xs: Tuple as) : Tuple (lcons(a,as))
-
-arrow (as: List Type, end: Type) : Type :=
-    case as
-        lnil => end
-        lcons a' as' => a' -> arrow(as', end)
-
-curry {as,b} (f: Tuple as->b) : arrow(as,b) :=
-    case as
-        lnil => f tnil
-        lcons a' as' => \x. curry \xs.(f tcons(x, xs))
-
-(*
-
-zip {a b} (xs: List{a}) (ys: List{b}) : Option{List{T*U}} :=
-    match (xs, ys)
-        (lcons(x',xs') , lcons(y',ys')) => some $ lcons((x',y'), zip(xs',ys'))
-        (lnil , lnil) => some lnil
-        (lnil , lcons(_,_)) => none
-        (lcons(_,_) , lnil) => none
-
-length (xs: List) : Nat :=
-    match xs
-        lnil => 0
-        lcons(_x',xs') => 1 + length(xs')
-
-all {T] (xs: List[T], p: T->Bool) : Bool :=
-    match xs
-        lnil => true
-        lcons(x',xs') => p(x') and all(xs', p)
-
-any [T] (xs: List[T], p: T->Bool) : Bool :=
-    match xs
-        lnil => true
-        lcons(x',xs') => p(x') or any(xs', p)
-
-infix(in) in (x, xs: List) : Bool :=
-    any xs \x'. x' = x
-
-*)

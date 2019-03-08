@@ -6,11 +6,12 @@ use super::ext;
 pub enum Term {
     Ident(Ident),
     Universe,
-    App{f: TermWithLoc, x: TermWithLoc},
-    Pi{x: Ident, A: TermWithLoc, B: TermWithLoc},
+    AppChain{f: TermWithLoc, args: Vec<(TermWithLoc, bool)>},
+    Pi{x: Ident, A: TermWithLoc, B: TermWithLoc, implicit: bool},
     Arrow{A: TermWithLoc, B: TermWithLoc},
     // Infix(Infix),
     Typing(Typing),
+    // ArgTyping(TermWithLoc),
     Let{env: Env, body: TermWithLoc},
     Lam{x: Ident, A: TermWithLoc, t: TermWithLoc},
     Case{t: TermWithLoc, arms: Vec<(Arm, Loc)>},
@@ -23,11 +24,28 @@ impl fmt::Display for Term {
         match self {
             Term::Ident(i) => write!(f, "{}", i),
             Term::Universe => write!(f, "type"),
-            Term::App{f:_f,x} => write!(f, "{} {}", _f, x),
-            Term::Pi{x,A,B} => write!(f, "(({}:{}) -> {})", x, A, B),
+            Term::AppChain{f:_f, args} => {
+                write!(f, "{}", _f)?;
+                for (arg, implicit) in args {
+                    if *implicit {
+                        write!(f, " {{{}}}", arg)?;
+                    }
+                    else {
+                        write!(f, " {}", arg)?;
+                    }
+                }
+                Ok(())
+            },
+            Term::Pi{x,A,B, implicit} => if *implicit {
+                write!(f, "({{{}:{}}} -> {})", x, A, B)
+            }
+            else {
+                write!(f, "(({}:{}) -> {})", x, A, B)
+            },
             Term::Arrow{A,B} => write!(f, "({} -> {})", A, B),
             // Term::Infix(i) => write!(f, "({})", i),
             Term::Typing(ty) => write!(f, "({})", ty),
+            // Term::ArgTyping(t) => write!(f, "'{}", t),
             Term::Let{env, body} => write!(f, "(let {} in {})", env, body),
             Term::Lam{x,A,t} => write!(f, "(\\{}:{}->{})", x, A, t),
             Term::Case{t, arms} => {

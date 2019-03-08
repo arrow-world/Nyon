@@ -61,6 +61,7 @@ pub enum Op {
     VertialBar,
     Dot,
     Question,
+    ArgTyping,
     Other(String),
 }
 
@@ -133,6 +134,7 @@ fn lex<I>() -> impl Parser<Input = I, Output = TokenWithPos>
         token('|').map(|_| Op::VertialBar),
         token('.').map(|_| Op::Dot),
         token('?').map(|_| Op::Question),
+        token('\'').map(|_| Op::ArgTyping),
     )).skip(not_followed_by(op_char())) )
         .or(many1::<String,_>(op_char()).map(|s| Op::Other(s)));
 
