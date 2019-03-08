@@ -1,6 +1,7 @@
 pub mod ast;
 mod lexer;
 mod parser;
+pub(super) mod ext;
 
 pub use self::lexer::lex_src;
 pub use self::parser::parse_env;

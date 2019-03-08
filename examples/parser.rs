@@ -11,7 +11,7 @@ fn main(){
     env_logger::init();
 
     let mut source = String::new();
-    File::open("test.ner").unwrap().read_to_string(&mut source).unwrap();
+    File::open("stdlib/collections/list.nyn").unwrap().read_to_string(&mut source).unwrap();
     let source = source;
 
     let lexed = match syntax::lex_src(&source) {
@@ -45,8 +45,10 @@ fn main(){
 
     let (env, scope) = match core::translator::translate_module(module) {
         Ok(x) => x,
-        Err(e) => {
-            println!("translate error: {:#?}", e);
+        Err(es) => {
+            for (e, locs) in es {
+                println!("translate error: {} at {:?}", e.message(), locs);
+            }
             return;
         }
     };

@@ -1,0 +1,7 @@
+type SemiNamedTuple[Ts: List(meta.Identifier*Type)] :== Tuple[lmap(\T. T*Option[meta.Identifier], Ts)]
+    where let names := lmap(\(name,T).name, Ts) in
+        lmultiplicity(names) = 1
+
+type NamedTuple[Ts: List(meta.Identifier*Type)] :== Tuple[lmap(\T. T*meta.Identifier, Ts)]
+    where let names := lmap(\(name,T).name, Ts) in
+        lmultiplicity(names) = 1

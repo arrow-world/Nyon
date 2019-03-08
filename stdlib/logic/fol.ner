@@ -1,0 +1,19 @@
+module syntax(Var:Type)
+    inductive Term
+        var : Var -> Term
+        infix(-->) impl : Term -> Term -> Term
+        infix(&) and : Term -> Term -> Term
+        infix(|) or : Term -> Term -> Term
+        prefix(~) not : Term -> Term
+        forall : Var -> Term -> Term
+        exists : Var -> Term -> Term
+        bot : Term
+    
+    self.proof : Type
+    
+module semantics
+    variant Bool
+        true
+        false
+    
+    self.valid_proof? : syntax.proof -> bool

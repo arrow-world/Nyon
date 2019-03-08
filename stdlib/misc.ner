@@ -1,0 +1,14 @@
+datatype Nat
+    z : Nat
+    s : Nat -> Nat
+
+autoimpl Eq for Nat
+
+type Int == Nat*Nat
+
+impl Eq for Int
+    `= (a,b) (c,d) := a + d = b + c
+
+id x := x
+
+flip [a,b,c] (f: a->b->c) : b->a->c := \x.\y. f y x

@@ -52,7 +52,7 @@ pub(super) fn subst(s: Subst, e: (Rc<Expr>, Loc)) -> (Rc<Expr>, Loc) {
         (Subst::Dot(e,s), Expr::DBI(0)) => subst(Subst::identity(), e),
         (Subst::Dot(e,s), Expr::DBI(k)) => subst((*s).clone(), (Rc::new(Expr::DBI(k-1)), None)),
         (s, Expr::Pi(a)) => (Rc::new(Expr::Pi(subst_abs(s, &a))), None),
-        (s, Expr::Lam(a)) => (Rc::new(Expr::Pi(subst_abs(s, &a))), None),
+        (s, Expr::Lam(a)) => (Rc::new(Expr::Lam(subst_abs(s, &a))), None),
         (s, Expr::App{s: t, t: u}) => (Rc::new( Expr::App {
             s: subst_typed(s.clone(), &t),
             t: subst_typed(s, &u),

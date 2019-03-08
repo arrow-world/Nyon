@@ -1,0 +1,3 @@
+type Record [Name, T] == FinMap(Name, T)
+
+type Struct[T] == Record[meta.Symbol, T]

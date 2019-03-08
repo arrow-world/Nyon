@@ -2,6 +2,7 @@ use syntax::Loc;
 use syntax::loc_range;
 use super::ast;
 use super::lexer;
+use super::ext;
 
 use combine::*;
 use combine::stream::{state::State, easy};
@@ -50,7 +51,8 @@ parser! {
     }
 }
 
-fn compound<I, O, F, P>(mut p: F, indent_lvl: i64, sep: lexer::Token) -> impl Parser<Input = I, Output = Vec<(O, Loc)>>
+pub(super) fn compound<I, O, F, P>(mut p: F, indent_lvl: i64, sep: lexer::Token)
+    -> impl Parser<Input = I, Output = Vec<(O, Loc)>>
     where I: Stream<Item = lexer::Token, Position = usize>,
           I::Error: ParseError<I::Item, I::Range, I::Position>,
           O: Clone,
@@ -93,16 +95,6 @@ fn expr_app<I>(indent_lvl: i64) -> impl Parser<Input = I, Output = ast::TermWith
     )
 }
 
-fn userdefop<I>() -> impl Parser<Input = I, Output = ast::Op>
-    where I: Stream<Item = lexer::Token, Position = usize>,
-          I::Error: ParseError<I::Item, I::Range, I::Position>
-{
-    satisfy_map( |t|
-        if let lexer::Token::Op(lexer::Op::UserDef(s)) = t { Some(ast::Op(s)) }
-        else { None }
-    )
-}
-
 fn expr_udi<I>(indent_lvl: i64) -> impl Parser<Input = I, Output = ast::Term>
     where I: Stream<Item = lexer::Token, Position = usize>,
           I::Error: ParseError<I::Item, I::Range, I::Position>
@@ -141,9 +133,9 @@ fn term<I>(indent_lvl: i64) -> impl Parser<Input = I, Output = ast::TermWithLoc>
         (position(), choice((
             attempt( ident().map(|i| ast::Term::Ident(i)) ),
             attempt( token(lexer::Token::Keyword(lexer::Keyword::Type)).map(|_| ast::Term::Universe) ),
-            attempt( lit(indent_lvl).map(|lit| ast::Term::Lit(lit)) ),
             attempt( token(lexer::Token::Op(lexer::Op::Question)).with(optional(ident()))
                 .map(|i| ast::Term::Hole(i)) ),
+            attempt( ext::ext_term(indent_lvl).map(|et| ast::Term::Ext(et)) ),
         )), position()).map(|(start, t, end)| ast::TermWithLoc{term: Box::new(t), start, end}),
         attempt(
             token(lexer::Token::Sep(lexer::Sep::OpenParen)).skip(lfs())
@@ -178,9 +170,10 @@ fn expr_abs<I>(indent_lvl: i64) -> impl Parser<Input = I, Output = ast::TermWith
         .skip(token(lexer::Token::Op(lexer::Op::Arrow))).skip(lfs()).and(expr(indent_lvl))
         .map(|((x,A),t)| ast::Term::Lam{x,A,t});
     
-    let expr_pi = || token(lexer::Token::Op(lexer::Op::VertialBar)).skip(lfs()).with(ident()).skip(lfs())
+    let expr_pi = || token(lexer::Token::Sep(lexer::Sep::OpenParen)).skip(lfs()).with(ident()).skip(lfs())
         .skip(token(lexer::Token::Op(lexer::Op::Typing))).skip(lfs()).and(expr(indent_lvl)).skip(lfs())
-        .skip(token(lexer::Token::Op(lexer::Op::VertialBar))).skip(lfs()).and(expr(indent_lvl))
+        .skip(token(lexer::Token::Sep(lexer::Sep::OpenParen))).skip(lfs())
+        .skip(token(lexer::Token::Op(lexer::Op::Arrow))).skip(lfs()).and(expr(indent_lvl))
         .map(|((x,A),B)| ast::Term::Pi{x,A,B});
     
     (position(), choice(( attempt(expr_lam()), attempt(expr_pi()) )), position())
@@ -257,27 +250,6 @@ parser! {
     }
 }
 
-fn lit<I>(indent_lvl: i64) -> impl Parser<Input = I, Output = ast::Lit>
-    where I: Stream<Item = lexer::Token, Position = usize>,
-          I::Error: ParseError<I::Item, I::Range, I::Position>,
-{
-    attempt( satisfy_map( |t| if let lexer::Token::Lit(lit) = t {
-            Some( match lit {
-                lexer::Lit::Nat(n) => ast::Lit::Nat(n),
-                lexer::Lit::Int(i) => ast::Lit::Int(i),
-                lexer::Lit::Str(s) => ast::Lit::Str(s),
-            } )
-        }
-        else { None }
-    ) ).or(
-        token(lexer::Token::Sep(lexer::Sep::OpenBracket)).skip(lfs())
-        .with(sep_end_by(expr(indent_lvl),
-            attempt(lfs().skip(token(lexer::Token::Sep(lexer::Sep::Comma))).skip(lfs()))))
-        .skip(token(lexer::Token::Sep(lexer::Sep::CloseBracket)))
-        .map(|es| ast::Lit::Tuple(es))
-    )
-}
-
 fn ident<I>() -> impl Parser<Input = I, Output = ast::Ident>
     where I: Stream<Item = lexer::Token, Position = usize>,
           I::Error: ParseError<I::Item, I::Range, I::Position>,
@@ -304,7 +276,7 @@ fn indent_fix<I>(indent_lvl: i64) -> impl Parser<Input = I, Output = ()>
     satisfy(move |t| if let lexer::Token::Indent{lvl} = t { lvl as i64 == indent_lvl } else { false }).with(value(()))
 }
 
-fn lfs<I>() -> impl Parser<Input = I, Output = ()> 
+pub(super) fn lfs<I>() -> impl Parser<Input = I, Output = ()> 
     where I: Stream<Item = lexer::Token>,
           I::Error: ParseError<I::Item, I::Range, I::Position>,
 {

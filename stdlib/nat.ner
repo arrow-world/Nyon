@@ -1,0 +1,13 @@
+datatype Nat
+    z : Nat
+    s : Nat -> Nat
+
+use Nat.*
+
+add : Nat*Nat -> Nat
+add(Nat.z, n) := n
+add(Nat.s(k), n) := Nat.s(add(k,n))
+
+mul : Nat*Nat -> Nat
+mul(Nat.z, n) := Nat.z
+mul(Nat.s(k), n) := add(mul(k,n), n)

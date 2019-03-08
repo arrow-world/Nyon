@@ -61,7 +61,7 @@ pub enum Op {
     VertialBar,
     Dot,
     Question,
-    UserDef(String),
+    Other(String),
 }
 
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
@@ -98,7 +98,7 @@ fn lex<I>() -> impl Parser<Input = I, Output = TokenWithPos>
     let op_char = || satisfy(|c:char| c.is_punctuation_other() || c.is_symbol_math());
 
     let kw = || choice((
-        attempt( string("datatype").map(|_| Keyword::Datatype) ),
+        attempt( string("data").map(|_| Keyword::Datatype) ),
         attempt( string("where").map(|_| Keyword::Where) ),
         attempt( string("infix_prio").map(|_| Keyword::InfixPrio) ),
         attempt( string("infix").map(|_| Keyword::Infix) ),
@@ -134,7 +134,7 @@ fn lex<I>() -> impl Parser<Input = I, Output = TokenWithPos>
         token('.').map(|_| Op::Dot),
         token('?').map(|_| Op::Question),
     )).skip(not_followed_by(op_char())) )
-        .or(many1::<String,_>(op_char()).map(|s| Op::UserDef(s)));
+        .or(many1::<String,_>(op_char()).map(|s| Op::Other(s)));
 
     let token = || choice((
         attempt( kw().map(|kw| Token::Keyword(kw)) ),

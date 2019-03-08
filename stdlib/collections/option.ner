@@ -1,0 +1,5 @@
+datatype Option[T]
+    some : T -> Option[T]
+    none : Option[T]
+
+use Option.{some, none}

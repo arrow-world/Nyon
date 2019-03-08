@@ -7,7 +7,7 @@ pub mod unification;
 pub mod serialize;
 pub mod errors;
 
-pub use self::typechk::HoledTerm;
+pub(crate) use self::typechk::HoledTerm;
 
 use syntax::{Loc, loc};
 use std::rc::Rc;

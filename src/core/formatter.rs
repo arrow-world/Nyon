@@ -20,7 +20,7 @@ impl fmt::Display for HoledTerm {
                 HoledTerm::Universe => write!(f, "Type"),
                 HoledTerm::App{s,t} => write!(f, "{} {}", s.0, t.0),
                 HoledTerm::Lam(HoledAbs{A,t}) => write!(f, "(\\:{} -> {})", A.0, t.0),
-                HoledTerm::Pi(HoledAbs{A,t}) => write!(f, "(|:{}| {})", A.0, t.0),
+                HoledTerm::Pi(HoledAbs{A,t}) => write!(f, "((:{}) -> {})", A.0, t.0),
                 HoledTerm::Let{env, t} => {
                     writeln!(f, "let {{")?;
                     env.fmt_with_indent(f, lvl+1)?;

@@ -1,4 +1,5 @@
 use syntax::ast;
+use syntax::ext;
 use core;
 use core::typechk;
 
@@ -9,7 +10,7 @@ use syntax::{Loc, loc};
 use std::rc::Rc;
 use std::collections::HashMap;
 
-type TranslateErr = (TranslateErrWithoutLoc, Loc);
+pub(crate) type TranslateErr = (TranslateErrWithoutLoc, Loc);
 
 pub fn translate_module<'a>(ast: ast::Module) -> Result<(core::Env, Rc<core::modules::Scope>), Vec<TranslateErr>> {
     let mut regctx = RegisterCtx::new(core::modules::Scope::top());
@@ -81,7 +82,7 @@ fn translate_const(c: UntranslatedConst, id: core::ConstId, regctx: &mut Registe
     } )
 }
 
-fn translate_term(term_withloc: ast::TermWithLoc, regctx: &mut RegisterCtx)
+pub(crate) fn translate_term(term_withloc: ast::TermWithLoc, regctx: &mut RegisterCtx)
     -> Result<(Rc<core::HoledTerm>, Loc), TranslateErr>
 {
     let term = *term_withloc.term.clone();
@@ -194,7 +195,7 @@ fn translate_term(term_withloc: ast::TermWithLoc, regctx: &mut RegisterCtx)
             } )
         },
         ast::Term::If{..} => unimplemented!(),
-        ast::Term::Lit(lit) => translate_literal(lit, regctx)?,
+        ast::Term::Ext(et) => ext::translate_ext_term(et, regctx)?,
         ast::Term::Hole(i) =>
             if let Some(i) = i {
                 /* let hole_id =
@@ -293,32 +294,6 @@ impl AbsCtx {
     }
 }
 
-fn translate_literal(lit: ast::Lit, regctx: &mut RegisterCtx) -> Result<Rc<typechk::HoledTerm>, TranslateErr> {
-    use std::iter;
-
-    Ok( match lit {
-        ast::Lit::Nat(n) => Rc::new( typechk::HoledTerm::Value(typechk::Value::Nat(n)) ),
-        ast::Lit::Int(i) => Rc::new( typechk::HoledTerm::Value(typechk::Value::Int(i)) ),
-        ast::Lit::Str(s) => Rc::new( typechk::HoledTerm::Value(typechk::Value::Str(s)) ),
-        ast::Lit::Tuple(ts) => {
-            let cons = (
-                Rc::new(typechk::HoledTerm::Const( regctx.scope.resolve(iter::once("Tuple"), "Cons").unwrap() )),
-                None,
-            );
-            let nil = Rc::new(typechk::HoledTerm::Const( regctx.scope.resolve(iter::once("Tuple"), "Nil").unwrap() ));
-
-            ts.into_iter().try_fold( nil, |t, head| -> Result<_, TranslateErr> {
-                Ok(Rc::new(
-                    typechk::HoledTerm::App{
-                        s: (Rc::new( typechk::HoledTerm::App{s: cons.clone(), t: translate_term(head, regctx)? } ), None),
-                        t: (t, None),
-                    }
-                ))
-            } )?
-        },
-    } )
-}
-
 fn register_module(regctx: &mut RegisterCtx, ast_module: ast::Module) -> Result<(), TranslateErr>
 {
     register_env(regctx, ast_module.env)?;
@@ -412,9 +387,9 @@ fn coerce_ident(term: ast::TermWithLoc) -> Result<ast::Ident, TranslateErr> {
 }
 
 #[derive(Clone)]
-struct RegisterCtx {
+pub(crate) struct RegisterCtx {
     env: core::Env,
-    scope: Rc<core::modules::Scope>,
+    pub(crate) scope: Rc<core::modules::Scope>,
     consts: Vec<(UntranslatedConst, Loc)>,
     typings: Vec<UntranslatedTyping>,
     ac: AbsCtx,

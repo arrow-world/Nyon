@@ -1,5 +1,6 @@
 use syntax::Loc;
 use std::fmt;
+use super::ext;
 
 #[derive(Clone, Debug)]
 pub enum Term {
@@ -14,7 +15,7 @@ pub enum Term {
     Lam{x: Ident, A: TermWithLoc, t: TermWithLoc},
     Case{t: TermWithLoc, arms: Vec<(Arm, Loc)>},
     If{p: TermWithLoc, tv: TermWithLoc, fv: TermWithLoc},
-    Lit(Lit),
+    Ext(ext::ExtTerm),
     Hole(Option<Ident>),
 }
 impl fmt::Display for Term {
@@ -22,8 +23,8 @@ impl fmt::Display for Term {
         match self {
             Term::Ident(i) => write!(f, "{}", i),
             Term::Universe => write!(f, "type"),
-            Term::App{f:_f,x} => write!(f, "({} {})", _f, x),
-            Term::Pi{x,A,B} => write!(f, "(|{}:{}| {})", x, A, B),
+            Term::App{f:_f,x} => write!(f, "{} {}", _f, x),
+            Term::Pi{x,A,B} => write!(f, "(({}:{}) -> {})", x, A, B),
             Term::Arrow{A,B} => write!(f, "({} -> {})", A, B),
             // Term::Infix(i) => write!(f, "({})", i),
             Term::Typing(ty) => write!(f, "({})", ty),
@@ -38,7 +39,7 @@ impl fmt::Display for Term {
                 write!(f, ")")
             },
             Term::If{p, tv, fv} => write!(f, "(if {} then {} else {})", p, tv, fv),
-            Term::Lit(lit) => write!(f, "{}", lit),
+            Term::Ext(et) => write!(f, "{}", et),
             Term::Hole(i) => write!(f, "?{}", if let Some(i) = i { format!("{}", i) } else { "".into() }),
         }
     }
@@ -108,31 +109,6 @@ pub struct Typing {
 impl fmt::Display for Typing {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "{}:{}", self.x, self.T)
-    }
-}
-
-#[derive(Clone, Debug)]
-pub enum Lit {
-    Nat(::num::BigInt),
-    Int(::num::BigInt),
-    Str(String),
-    Tuple(Vec<TermWithLoc>),
-}
-impl fmt::Display for Lit {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match self {
-            Lit::Nat(n) => write!(f, "{}", n),
-            Lit::Int(i) => write!(f, "{:+}", i),
-            Lit::Str(s) => write!(f, "{}", s),
-            Lit::Tuple(es) => {
-                write!(f, "[")?;
-                for i in 0..es.len() {
-                    write!(f, "{:}", es[i])?;
-                    if i < es.len()-1 { write!(f, ", ")?; }
-                }
-                write!(f, "]")
-            },
-        }
     }
 }
 

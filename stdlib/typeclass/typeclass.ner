@@ -1,0 +1,3 @@
+struct TypeClass
+    types: K -> Type
+    constraints: (|k:K| types k) -> logic.hol.Prop

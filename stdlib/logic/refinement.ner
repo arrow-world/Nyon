@@ -1,0 +1,24 @@
+module self(Var:Type)
+    struct RefinementType
+        base_type : Type
+        predicate : fol(Var).Predicate(base_type)
+    
+    opaque_struct Val(R: RefinementType)
+        raw : R.base_type
+    public
+        new(x: R.base_type) : Either[fol(Var).TestResult, Term] :=
+            either.map
+                fol(Var).test_predicate(R.predicate, x)
+                Term{raw => x}
+    
+    def_notation REFINE
+        refine #{typename: meta.SimpleName} #{params: meta.Params} == #{base_type: meta.Term(params)}
+            where #{predicate: meta.Term(params)}
+    as
+        #{typename} #{params} :=
+            RefinementType(meta.Symbol) {
+                base_type => #{base_type}
+                predicate => #{predicate}
+            }
+    where
+        meta.typeof(predicate) = fol(Var).Predicate()

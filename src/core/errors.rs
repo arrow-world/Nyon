@@ -18,7 +18,7 @@ pub enum TranslateErr {
     ExpectedSelfDatatype,
 }
 impl TranslateErr {
-    pub fn message(&self, scope: &Scope) -> String {
+    pub fn message(&self/*, scope: &Scope*/) -> String {
         match self {
             TranslateErr::CantSpecifyNamespace(i) => format!("qualified name `{}` is not allowed here", i),
             TranslateErr::UndefinedIdent(i) => format!("undefined name `{}`", i),
@@ -29,7 +29,7 @@ impl TranslateErr {
             TranslateErr::ExpectedTyping => format!("expected type annotation"),
             TranslateErr::MismatchDataType{arm_no} => format!("mismatch datatype at {}-th arm", arm_no),
             TranslateErr::DuplicatedPatterns{..} => format!("duplicated pattern"),
-            TranslateErr::NonExhaustivePattern{ctor} => format!("constructor `{}` not covered", scope.names()[*ctor]),
+            TranslateErr::NonExhaustivePattern{ctor} => format!("constructor `{}` not covered", *ctor/*scope.names()[*ctor]*/),
             TranslateErr::ConflictedDatatypeName(name) => format!("conflicted datatype name `{}`", name),
             TranslateErr::ExpectedSelfDatatype => format!("expected self datatype"),
         }
