@@ -15,10 +15,15 @@ pub struct SourceLocation {
 pub type Loc = Option<Vec<SourceLocation>>;
 
 pub fn loc(t: &ast::TermWithLoc) -> Loc {
-    Some( vec![ SourceLocation {
-        start: t.start,
-        end: t.end,
-    } ] )
+    if t.start == 0 && t.end == 0 {
+        None
+    }
+    else {
+        Some( vec![ SourceLocation {
+            start: t.start,
+            end: t.end,
+        } ] )
+    }
 }
 
 pub fn loc_range(start: usize, end: usize) -> Loc {

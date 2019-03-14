@@ -5,7 +5,7 @@ use super::lexer;
 use super::parser::*;
 use core::{HoledTerm};
 use core::typechk::{Value};
-use core::translator::{RegisterCtx, TranslateErr, translate_term};
+use core::translator::{self, RegisterCtx, TranslateErr, translate_term};
 
 use combine::*;
 use std::fmt;
@@ -51,6 +51,16 @@ pub(crate) fn translate_ext_term(et: ExtTerm, regctx: &mut RegisterCtx)
     match et {
         ExtTerm::Lit(l) => translate_literal(l, regctx),
         ExtTerm::Infix{head, tail} => translate_infix(head, tail, regctx),
+    }
+}
+
+pub(crate) fn list_occurred(term: &ExtTerm, vars: &Vec<&str>, list: &mut Vec<usize>) {
+    match term {
+        ExtTerm::Lit(lit) => (),
+        ExtTerm::Infix{head, tail} => {
+            translator::list_occurred_accum(&head.term, vars, list);
+            for (_op, t) in tail { translator::list_occurred_accum(&t.term, vars, list); }
+        }
     }
 }
 
@@ -116,9 +126,14 @@ fn translate_literal(lit: Lit, regctx: &mut RegisterCtx) -> Result<Rc<HoledTerm>
 
             ts.into_iter().try_fold( nil, |t, head| -> Result<_, TranslateErr> {
                 Ok(Rc::new(
-                    HoledTerm::App{
-                        s: (Rc::new( HoledTerm::App{s: cons.clone(), t: translate_term(head, regctx)? } ), None),
+                    HoledTerm::App {
+                        s:  (Rc::new( HoledTerm::App {
+                                s: cons.clone(),
+                                t: translate_term(head, regctx)?,
+                                implicit: false
+                            } ), None),
                         t: (t, None),
+                        implicit: false,
                     }
                 ))
             } )?

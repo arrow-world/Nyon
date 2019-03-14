@@ -18,9 +18,18 @@ impl fmt::Display for HoledTerm {
                 HoledTerm::Const(const_id) => write!(f, "#{}", const_id),
                 HoledTerm::DBI(i) => write!(f, "@{}", i),
                 HoledTerm::Universe => write!(f, "Type"),
-                HoledTerm::App{s,t} => write!(f, "{} {}", s.0, t.0),
-                HoledTerm::Lam(HoledAbs{A,t}) => write!(f, "(\\:{} -> {})", A.0, t.0),
-                HoledTerm::Pi(HoledAbs{A,t}) => write!(f, "((:{}) -> {})", A.0, t.0),
+                HoledTerm::App{s, t, implicit} => {
+                    if *implicit { write!(f, "{} {{{}}}", s.0, t.0) }
+                    else { write!(f, "{} {}", s.0, t.0) }
+                },
+                HoledTerm::Lam(HoledAbs{A,t}, implicit) => {
+                    if *implicit { write!(f, "(\\{{_:{}}} -> {})", A.0, t.0) }
+                    else { write!(f, "(\\_:{} -> {})", A.0, t.0) }
+                },
+                HoledTerm::Pi(HoledAbs{A,t}, implicit) => {
+                    if *implicit { write!(f, "({{_:{}}} -> {})", A.0, t.0) }
+                    else { write!(f, "((_:{}) -> {})", A.0, t.0) }
+                },
                 HoledTerm::Let{env, t} => {
                     writeln!(f, "let {{")?;
                     env.fmt_with_indent(f, lvl+1)?;
@@ -48,20 +57,18 @@ impl HoledEnv {
         for (id, (c, loc)) in self.consts.iter().enumerate() {
             write_indent(f, lvl)?;
             match c {
-                HoledConst::Def((t, _loc)) => writeln!(f, "#{} := {}", id, t)?,
+                HoledConst::Def{rhs: (t, _loc), type_} => {
+                    writeln!(f, "#{} : {} := {}", id, type_.0, t)?
+                },
                 HoledConst::DataType{param_types, ..} => {
                     write!(f, "datatype #{}", id)?;
                     for (param_type, loc) in param_types {
-                        write!(f, " @:{}", param_type)?;
+                        write!(f, " '{}", param_type)?;
                     }
                     writeln!(f, " {{ ... }}")?
                 },
-                HoledConst::Ctor{datatype, param_types} => {
-                    write!(f, "#{}.#{}", datatype, id)?;
-                    for (param_type, loc) in param_types {
-                        write!(f, " @:{}", param_type)?;
-                    }
-                    writeln!(f, "")?
+                HoledConst::Ctor{datatype, type_} => {
+                    write!(f, "#{}.#{} : {}", datatype, id, type_.0)?;
                 },
             }
             writeln!(f, "")?;
@@ -138,21 +145,16 @@ fn fmt_infer_env(env: &InferEnv, f: &mut fmt::Formatter, lvl: usize) -> fmt::Res
     for (id, c) in env.iter().enumerate() {
         write_indent(f, lvl)?;
         match c.c {
-            InferConst::Def(ref t) => writeln!(f, "#{} := {} : {}", id, t, c.type_)?,
+            InferConst::Def(ref t) => writeln!(f, "#{} := {} : {}", id, t.0, c.type_.0)?,
             InferConst::DataType{ref param_types, ..} => {
-                write!(f, "datatype #{} : {}", id, c.type_)?;
+                write!(f, "datatype #{} : {}", id, c.type_.0)?;
                 for param_type in param_types {
                     write!(f, " @:{}", param_type)?;
                 }
                 writeln!(f, " {{ ... }}")?;
             },
-            InferConst::Ctor{ref datatype, ref param_types} => {
-                write!(f, "#{}.#{} : {}", datatype, id, c.type_)?;
-                for param_type in param_types {
-                    write!(f, " @:{}", param_type)?;
-                }
-                writeln!(f, "")?
-            },
+            InferConst::Ctor{ref datatype} => 
+                write!(f, "#{}.#{} : {}", datatype, id, c.type_.0)?,
         }
         writeln!(f, "")?;
     }

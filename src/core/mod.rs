@@ -20,6 +20,7 @@ pub type HoleId = usize;
 pub struct Env {
     pub consts: Vec<Option<(typechk::HoledConst, Loc)>>,
     pub typings: Vec<Option<((Rc<HoledTerm>, Loc), (Rc<HoledTerm>, Loc))>>,
+    pub nof_namedhole: usize,
 }
 impl Env {
     pub fn extend(&mut self, other: Env) {
@@ -31,6 +32,7 @@ impl Env {
         Env {
             consts: Vec::new(),
             typings: Vec::new(),
+            nof_namedhole: 0,
         }
     }
 }
@@ -40,7 +42,7 @@ impl From<Env> for typechk::HoledEnv {
         typechk::HoledEnv {
             consts: env.consts.into_iter().map(|c| c.unwrap()).collect(),
             typings: env.typings.into_iter().map(|t| t.unwrap()).collect(),
-            nof_named_hole: 0,
+            nof_named_hole: env.nof_namedhole,
         }
     }
 }

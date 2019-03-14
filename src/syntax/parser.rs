@@ -21,7 +21,7 @@ fn env_<I>(indent_lvl: i64) -> impl Parser<Input = I, Output = ast::Env>
 
     let def_datatype = move |indent_lvl: i64|
         token(lexer::Token::Keyword(lexer::Keyword::Datatype)).skip(lfs())
-        .with(expr(indent_lvl))
+        .with(expr(indent_lvl)).skip(lfs()).skip(token(lexer::Token::Keyword(lexer::Keyword::Where)))
         .and(compound(|inner_indent_lvl| expr(inner_indent_lvl), indent_lvl, lexer::Token::Op(lexer::Op::VertialBar)))
         .map(|(header, ctors)| ast::Statement::Datatype{header, ctors: ctors.into_iter().map(|(t, _loc)| t).collect()});
     
@@ -41,6 +41,7 @@ fn env_<I>(indent_lvl: i64) -> impl Parser<Input = I, Output = ast::Env>
         // attempt( infix_prio() ),
         attempt( def(indent_lvl) ).map(|(l,r)| ast::Statement::Def(l,r)),
         attempt( typing(indent_lvl) ).map(|t| ast::Statement::Typing(t)),
+        // attempt( def_module(indent_lvl) ).map(|m| ast::Statement::Module(m)),
     ));
 
     compound(move |inner_indent_lvl| statement(inner_indent_lvl), indent_lvl, comma).map(|ss| ast::Env(ss))
@@ -89,7 +90,7 @@ fn expr_app<I>(indent_lvl: i64) -> impl Parser<Input = I, Output = ast::TermWith
     term(indent_lvl).and( many( choice((
         term(indent_lvl).map(|t| (t, false)),
         token(lexer::Token::Sep(lexer::Sep::OpenBrace))
-            .with(term(indent_lvl))
+            .with(expr(indent_lvl))
         .skip(token(lexer::Token::Sep(lexer::Sep::CloseBrace)))
             .map(|t| (t, true)),
         // token(lexer::Token::Op(lexer::Op::ArgTyping)).with(term(indent_lvl)).map(|t| )

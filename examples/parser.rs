@@ -47,7 +47,7 @@ fn main(){
 
     let show_errors = || {
         for (e, locs) in &errors {
-            println!("\terror: {} at {:?}", e.message(), locs);
+            println!("\terror: {} at {:?}", e.message(&scope), locs);
         }
     };
 
@@ -70,6 +70,10 @@ fn main(){
         show_errors();
         return;
     }
+
+    println!("{}", diyusi::core::typechk::HoledEnv::from(env));
+
+    return;
 
     println!("{:#?}\n", core::typechk::typechk(env.into()));
 }

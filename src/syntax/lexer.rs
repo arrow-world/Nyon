@@ -33,6 +33,8 @@ pub enum Keyword {
     Where,
     Infix,
     InfixPrio,
+    Module,
+    Import,
 }
 
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
@@ -103,7 +105,7 @@ fn lex<I>() -> impl Parser<Input = I, Output = TokenWithPos>
         attempt( string("where").map(|_| Keyword::Where) ),
         attempt( string("infix_prio").map(|_| Keyword::InfixPrio) ),
         attempt( string("infix").map(|_| Keyword::Infix) ),
-        attempt( string("type").map(|_| Keyword::Type) ),
+        attempt( string("Type").map(|_| Keyword::Type) ),
         attempt( string("let").map(|_| Keyword::Let) ),
         attempt( string("in").map(|_| Keyword::In) ),
         attempt( string("case").map(|_| Keyword::Case) ),
@@ -111,6 +113,8 @@ fn lex<I>() -> impl Parser<Input = I, Output = TokenWithPos>
         attempt( string("if").map(|_| Keyword::If) ),
         attempt( string("then").map(|_| Keyword::Then) ),
         attempt( string("else").map(|_| Keyword::Else) ),
+        attempt( string("module").map(|_| Keyword::Module) ),
+        attempt( string("import").map(|_| Keyword::Import) ),
     )).skip(not_followed_by(alpha_num()));
 
     let sep = || choice((

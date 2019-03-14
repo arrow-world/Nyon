@@ -8,7 +8,6 @@ use std::cell::RefCell;
 pub struct Scope {
     module: Rc<RefCell<Module>>,
     names: Vec<Name>,
-    holes: Vec<String>,
     parent: Option< Rc<Scope> >,
     base_cid: ConstId,
 }
@@ -17,7 +16,6 @@ impl Scope {
         Scope {
             module: Rc::new(RefCell::new(Module::anonymous_top())),
             names: Vec::new(),
-            holes: Vec::new(),
             parent: None,
             base_cid: 0,
         }
@@ -27,7 +25,6 @@ impl Scope {
         Scope {
             module,
             names: Vec::new(),
-            holes: Vec::new(),
             base_cid: parent.base_cid + parent.names.len(),
             parent: Some(parent),
         }
@@ -46,7 +43,7 @@ impl Scope {
     pub fn module(&self) -> Rc<RefCell<Module>> { self.module.clone() }
 
     pub fn register_const<Q: IntoIterator<Item=String> + Clone>(&mut self, qualifier: Q, identifier: String) 
-        -> Option< ConstId >
+        -> Result<ConstId, String>
     {
         let cid = self.next_cid();
 
@@ -56,7 +53,30 @@ impl Scope {
         module.borrow_mut().register(cid, identifier.clone());
         self.names.push(Name{qualifier, identifier});
 
-        Some(cid)
+        Ok(cid)
+    }
+
+    pub fn resolve_namedhole(&self, name: &::syntax::ast::Ident) -> Option<usize>
+    {
+        let qualifier = name.domain.iter().map(|s| s.as_str());
+        let identifier = &name.name;
+
+        search_namedhole(&self.module, qualifier.clone(), identifier)
+            .or_else(|| self.parent.clone().and_then(|parent| parent.resolve(qualifier, identifier)))
+    }
+
+    pub fn register_namedhole(&self, name: ::syntax::ast::Ident, id: usize)
+        -> Result<(), (::core::errors::TranslateErr, ::syntax::Loc)>
+    {
+        let domain = name.domain;
+        let loc = name.loc;
+
+        let qualifier = domain.iter().map(|s| s.as_str());
+        let module = search_module(&self.module, qualifier).map_err(
+            |module_name| (::core::errors::TranslateErr::UndefinedModule{name: module_name.into()}, loc)
+        )?;
+        module.borrow_mut().register_namedhole(id, name.name);
+        Ok(())
     }
 
     pub fn base_cid(&self) -> ConstId { self.base_cid }
@@ -88,6 +108,7 @@ impl ::std::fmt::Display for Name {
 pub struct Module {
     name: String,
     ids: HashMap<String, ConstId>,
+    namedhole_ids: HashMap<String, usize>,
     parent: Weak<RefCell<Module>>,
     children: HashMap< String, Rc<RefCell<Module>> >,
 }
@@ -96,6 +117,7 @@ impl<'s> Module {
         Module {
             name: String::new(),
             ids: HashMap::new(),
+            namedhole_ids: HashMap::new(),
             parent: Weak::new(),
             children: HashMap::new(),
         }
@@ -103,6 +125,10 @@ impl<'s> Module {
 
     pub fn register(&mut self, id: ConstId, name: String) {
         self.ids.insert(name, id);
+    }
+
+    pub fn register_namedhole(&mut self, id: usize, name: String) {
+        self.namedhole_ids.insert(name, id);
     }
 
     pub fn name(&self) -> &str { &self.name }
@@ -113,6 +139,7 @@ pub fn add_child<'s>(parent: &Rc<RefCell<Module>>, name: String) -> Result<Rc<Re
         Module {
             name: name.clone(),
             ids: HashMap::new(),
+            namedhole_ids: HashMap::new(),
             parent: Rc::downgrade(parent),
             children: HashMap::new(),
         }
@@ -123,21 +150,30 @@ pub fn add_child<'s>(parent: &Rc<RefCell<Module>>, name: String) -> Result<Rc<Re
 }
 
 const PARENT_MODULE : &str = "super";
+const SELF_MODULE : &str = "self";
 
-pub fn search_module<'a, I>(this: &Rc<RefCell<Module>>, qualifier: I) -> Option< Rc<RefCell<Module>> >
+pub fn search_module<'a, I>(this: &Rc<RefCell<Module>>, qualifier: I) -> Result<Rc<RefCell<Module>>, &'a str>
     where I: IntoIterator<Item=&'a str>
 {
     let mut path = qualifier.into_iter();
     let next = path.next();
     match next {
-        Some(x) if x == PARENT_MODULE => this.borrow().parent.upgrade().and_then(|x| search_module(&x, path)),
-        Some(x) => this.borrow().children.get(x).and_then(|x| search_module(&x, path)),
-        None => Some( this.clone() )
+        Some(x) if x == PARENT_MODULE => this.borrow().parent.upgrade().map(|x| search_module(&x, path))
+            .unwrap_or(Err(PARENT_MODULE)),
+        Some(x) if x == SELF_MODULE => search_module(this, path),
+        Some(x) => this.borrow().children.get(x).map(|x| search_module(&x, path)).unwrap_or(Err(x)),
+        None => Ok( this.clone() ),
     }
 }
 
 pub fn search_const<'a, Q: IntoIterator<Item=&'a str>>(this: &Rc<RefCell<Module>>, qualifier: Q, identifier: &str)
     -> Option<ConstId>
 {
-    search_module(this, qualifier).and_then(|x| x.borrow().ids.get(identifier).cloned())
+    search_module(this, qualifier).ok().and_then(|x| x.borrow().ids.get(identifier).cloned())
+}
+
+pub fn search_namedhole<'a, Q: IntoIterator<Item=&'a str>>(this: &Rc<RefCell<Module>>, qualifier: Q, identifier: &str)
+    -> Option<ConstId>
+{
+    search_module(this, qualifier).ok().and_then(|x| x.borrow().namedhole_ids.get(identifier).cloned())
 }
