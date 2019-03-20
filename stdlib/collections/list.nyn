@@ -1,17 +1,3 @@
-module m0
-    c0 := self.m1.c1
-    module m1
-        c1 := m2.c2
-        module m2
-            c2 := super.self.m3.c3
-    module m3
-        c3 := m4.c4
-        module m4
-            c4 := super.m5.self.c5
-        module m5
-            c5 := super.super.c0
-
-(*
 data Nat where
     zero : Nat
     succ : Nat -> Nat
@@ -23,15 +9,14 @@ data List {a:Type} where
 lnil := List.nil
 lcons := List.cons
 
-module option
-    data Option {a:Type} where
-        some : a -> Option{a}
-        none : Option{a}
+data Option {a:Type} where
+    some : a -> Option{a}
+    none : Option{a}
 
-some := option.Option.some
-none := option.Option.none
+some := Option.some
+none := Option.none
 
-at {a} (n: Nat) (xs: List{a}) : option.Option a :=
+at {a} (n: Nat) (xs: List{a}) : Option a :=
     case xs of
         List.nil y ys => case n of
             Nat.zero => some y,
@@ -42,4 +27,3 @@ map {a} {b} (f: a->b) (xs: List{a}) : List b :=
     case xs of
         List.nil => lnil,
         List.cons y ys => lcons (f y) (map f ys)
-*)

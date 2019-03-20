@@ -60,12 +60,17 @@ impl HoledEnv {
                 HoledConst::Def{rhs: (t, _loc), type_} => {
                     writeln!(f, "#{} : {} := {}", id, type_.0, t)?
                 },
-                HoledConst::DataType{param_types, ..} => {
-                    write!(f, "datatype #{}", id)?;
-                    for (param_type, loc) in param_types {
-                        write!(f, " '{}", param_type)?;
+                HoledConst::DataType{param_types, type_, ..} => {
+                    write!(f, "data #{}", id)?;
+                    for ((param_type, _loc), implicit) in param_types {
+                        if *implicit {
+                            write!(f, " '{{{}}}", param_type)?;
+                        }
+                        else {
+                            write!(f, " '{}", param_type)?;
+                        }
                     }
-                    writeln!(f, " {{ ... }}")?
+                    writeln!(f, " : {} {{ ... }}", type_.0)?
                 },
                 HoledConst::Ctor{datatype, type_} => {
                     write!(f, "#{}.#{} : {}", datatype, id, type_.0)?;

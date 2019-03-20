@@ -86,12 +86,21 @@ fn translate_const(c: UntranslatedConst, id: core::ConstId, regctx: &mut Registe
             }
         },
         UntranslatedConst::DataType{params, ret_type} => {
-            if ret_type.is_some() { unimplemented!() }
-            else {
-                typechk::HoledConst::DataType {
-                    param_types: vec![(Rc::new(typechk::HoledTerm::Hole(None)), None); params.len()],
-                    ctors: regctx.datatype_info[&id].ctors.clone(),
-                }
+            let (gadt_params, gadt_type) = {
+                let gadt_params_len = params.len();
+
+                let type_ = translate_parametric_term(
+                    ret_type.unwrap_or(ast::TermWithLoc{term: Box::new(ast::Term::Hole(None)), start: 0, end: 0}),
+                    params.into_iter(), regctx, |abs, implicit| typechk::HoledTerm::Pi(abs, implicit),
+                )?;
+
+                unfold_pi_chain(type_, gadt_params_len)
+            };
+
+            typechk::HoledConst::DataType {
+                param_types: gadt_params,
+                type_: gadt_type,
+                ctors: regctx.datatype_info[&id].ctors.clone(),
             }
         },
         UntranslatedConst::Ctor{datatype, type_} => {
@@ -403,8 +412,14 @@ fn translate_parametric_term<I, F>(term: ast::TermWithLoc, params: I, regctx: &m
         let hole = Rc::new(typechk::HoledTerm::Hole(None));
         if let Some(param) = params.next() {
             let implicit = param.implicit;
+            let A =
+                if let Some(param_type) = param.type_ {
+                    translate_term(param_type, regctx)?
+                }
+                else { (hole.clone(), None) };
+
             regctx.ac_push_temporary( param.name, |regctx, _name| Ok( Rc::new(abs_term.clone()(
-                typechk::HoledAbs{A: (hole.clone(), None), t: translate_rest(term.clone(), params, regctx, abs_term)?},
+                typechk::HoledAbs{A, t: translate_rest(term.clone(), params, regctx, abs_term)?},
                 implicit,
             )) ) )
                 .map( |t| (t, loc(&term)) )
@@ -726,15 +741,21 @@ fn unfold_app_chain(app_chain: ast::TermWithLoc) -> (ast::TermWithLoc, Vec<(ast:
     (rest, list)
 }
 
-fn unfold_pi_chain(pi_chain: (Rc<typechk::HoledTerm>, Loc))
+fn unfold_pi_chain(pi_chain: (Rc<typechk::HoledTerm>, Loc), len: usize)
     -> (Vec<((Rc<typechk::HoledTerm>, Loc), bool)>, (Rc<typechk::HoledTerm>, Loc))
 {
+    let mut count = 0;
+
     let mut list = Vec::new();
 
     let mut rest = pi_chain;
     while let typechk::HoledTerm::Pi(typechk::HoledAbs{A: ref T, t: ref U}, implicit) = *rest.0.clone() {
+        if count >= len { break; }
+
         list.push((T.clone(), implicit));
         rest = U.clone();
+
+        count += 1;
     }
 
     (list, rest)

@@ -38,7 +38,7 @@ pub struct HoledEnv {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum HoledConst {
     Def{rhs: (Rc<HoledTerm>, Loc), type_: (Rc<HoledTerm>, Loc)},
-    DataType{param_types: Vec<(Rc<HoledTerm>, Loc)>, ctors: Vec<ConstId>},
+    DataType{param_types: Vec<((Rc<HoledTerm>, Loc), bool)>, type_: (Rc<HoledTerm>, Loc), ctors: Vec<ConstId>},
     Ctor{datatype: ConstId, type_: (Rc<HoledTerm>, Loc)},
 }
 
@@ -668,10 +668,10 @@ fn assign_const(c: (HoledConst, Loc), inferterm_id: &mut InferTermId) -> InferTy
                 InferConst::Def(assign_term_nontyped(rhs, inferterm_id)),
                 assign_term_nontyped(type_, inferterm_id),
             ),
-        HoledConst::DataType{param_types, ctors} =>
+        HoledConst::DataType{param_types, type_, ctors} =>
             (
                 InferConst::DataType {
-                    param_types: param_types.into_iter().map(|t| assign_term(t, inferterm_id)).collect(),
+                    param_types: param_types.into_iter().map(|t| assign_term(t.0, inferterm_id)).collect(),
                     ctors,
                 },
                 unimplemented!(),
