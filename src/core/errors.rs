@@ -16,9 +16,12 @@ pub enum TranslateErr {
     NonExhaustivePattern{ctor: core::CtorId},
     ConflictedDatatypeName(String),
     ExpectedSelfDatatype,
-    RegLocalEnvErr(Vec<(TranslateErr, Loc)>),
+    LocalEnvRegErr(Vec<(TranslateErr, Loc)>),
     ExpectedParam,
-    UndefinedModule{name: String}
+    UndefinedModule{name: String},
+    ModuleDefInLocalScope,
+    ConflictedModuleName{name: String},
+    SubModuleRegErr(Vec<(TranslateErr, Loc)>),
 }
 impl TranslateErr {
     pub fn message(&self, scope: &Scope) -> String {
@@ -35,9 +38,12 @@ impl TranslateErr {
             TranslateErr::NonExhaustivePattern{ctor} => format!("constructor `{}` not covered", scope.names()[*ctor]),
             TranslateErr::ConflictedDatatypeName(name) => format!("conflicted datatype name `{}`", name),
             TranslateErr::ExpectedSelfDatatype => format!("expected self datatype"),
-            TranslateErr::RegLocalEnvErr(errs) => format!("local environment registering failed: {:#?}", errs),
+            TranslateErr::LocalEnvRegErr(errs) => format!("local environment registering failed: {:#?}", errs),
             TranslateErr::ExpectedParam => format!("expected parameter"),
             TranslateErr::UndefinedModule{name} => format!("undefined module `{}`", name),
+            TranslateErr::ModuleDefInLocalScope => format!("module definition is not allowed in local scope"),
+            TranslateErr::ConflictedModuleName{name} => format!("conflicted module name `{}`", name),
+            TranslateErr::SubModuleRegErr(errs) => format!("sub module registering failed: {:#?}", errs),
         }
     }
 }

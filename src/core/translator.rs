@@ -14,16 +14,34 @@ use std::collections::HashMap;
 pub(crate) type TranslateErr = (TranslateErrWithoutLoc, Loc);
 
 pub fn translate_module<'a>(ast: ast::Module) -> (Option<core::Env>, Rc<core::modules::Scope>, Vec<TranslateErr>) {
-    let mut regctx = RegisterCtx::new(core::modules::Scope::top());
+    let mut regctx = RegisterCtx::new(core::modules::Scope::top(), 0);
 
-    register_module(&mut regctx, ast);
-    if ! regctx.errors.is_empty() {
-        return (None, regctx.scope, regctx.errors);
+    let (mut sub_regctxs, next_cid) = register_module(&mut regctx, ast);
+    regctx.next_cid = next_cid;
+
+    if ! regctx.errors.is_empty() || sub_regctxs.iter().any(|regctx| ! regctx.errors.is_empty()) {
+        return ( None, regctx.scope,
+            regctx.errors.into_iter().chain(sub_regctxs.into_iter().map(|regctx| regctx.errors).flatten()).collect()
+        );
     }
 
-    translate_all(&mut regctx).unwrap_or_else(|e| {
+    regctx.datatype_info.extend( sub_regctxs.iter_mut().map(|r| r.datatype_info.drain()).flatten() );
+    regctx.ctor_info.extend( sub_regctxs.iter_mut().map(|r| r.ctor_info.drain()).flatten() );
+
+    sub_regctxs.iter_mut().for_each(|r| r.datatype_info.extend(regctx.datatype_info.iter().map(|(x,y)| (*x, y.clone()))));
+    sub_regctxs.iter_mut().for_each(|r| r.ctor_info.extend(regctx.ctor_info.iter().map(|(x,y)| (*x, y.clone()))));
+
+    translate_all(&mut regctx).unwrap_or_else( |e| {
         regctx.errors.push(e);
-    });
+    } );
+
+    for mut sub_regctx in sub_regctxs {
+        translate_all(&mut sub_regctx).unwrap_or_else( |e| {
+            sub_regctx.errors.push(e);
+        } );
+        regctx.env.extend(sub_regctx.env);
+        regctx.errors.extend(sub_regctx.errors);
+    }
 
     (Some(regctx.env), regctx.scope, regctx.errors)
 }
@@ -138,6 +156,7 @@ pub(crate) fn list_occurred_accum(term: &ast::Term, vars: &Vec<&str>, list: &mut
                         list_occurred_accum(&x.term, vars, list);
                         list_occurred_accum(&T.term, vars, list);
                     },
+                    ast::Statement::Module{..} => unreachable!(),
                 }
             }
             list_occurred_accum(&body.term, vars, list);
@@ -215,11 +234,14 @@ pub(crate) fn translate_term(term_withloc: ast::TermWithLoc, regctx: &mut Regist
         },
         ast::Term::Let{env: letenv, body} => {
             let mut local_regctx =
-                RegisterCtx::new(core::modules::Scope::new(regctx.scope.module(), regctx.scope.clone()));
+                RegisterCtx::new(core::modules::Scope::new(
+                    regctx.scope.module(),
+                    regctx.scope.clone(),
+                ), regctx.next_cid);
 
-            register_env(&mut local_regctx, letenv);
+            register_env(&mut local_regctx, letenv, true);
             if !local_regctx.errors.is_empty() {
-                return Err((TranslateErrWithoutLoc::RegLocalEnvErr(local_regctx.errors), None));
+                return Err((TranslateErrWithoutLoc::LocalEnvRegErr(local_regctx.errors), None));
             }
             let t = translate_term(body, &mut local_regctx)?;
 
@@ -403,28 +425,65 @@ impl AbsCtx {
     fn dbi(&self, ident: &str) -> Option<u64> {
         self.vars.iter().position(|var| var == ident).map(|i| (self.vars.len() - i - 1) as u64)
     }
+
+    fn is_empty(&self) -> bool { self.vars.is_empty() }
 }
 
-fn register_module(regctx: &mut RegisterCtx, ast_module: ast::Module) {
-    register_env(regctx, ast_module.env);
+fn register_module(regctx: &mut RegisterCtx, ast_module: ast::Module)
+    -> (Vec<RegisterCtx>, usize)
+{
+    let mut sub_regctxs = Vec::new();
 
-    for child in ast_module.children {
-        register_module(regctx, *child);
+    let inner_sub_modules = register_env(regctx, ast_module.env, false);
+
+    let sub_modules = ast_module.children.into_iter().map(|m| (*m, None)).chain(inner_sub_modules);
+    for (child, mod_name_loc) in sub_modules {
+        let name = child.name.clone();
+
+        let module = 
+            match core::modules::add_child(&regctx.scope.module(), name.clone()) {
+                Ok(m) => m,
+                Err(_) => {
+                    regctx.errors.push( (
+                        TranslateErrWithoutLoc::ConflictedModuleName{name: name.clone()},
+                        mod_name_loc
+                    ) );
+                    continue;
+                },
+            };
+        
+        let inner_scope = core::modules::Scope::new(module, regctx.scope.clone());
+        let mut regctx_inner = RegisterCtx::new(inner_scope, regctx.next_cid);
+
+        let (inner_sub_regctxs, next_cid) = register_module(&mut regctx_inner, child);
+        sub_regctxs.push(regctx_inner);
+        sub_regctxs.extend(inner_sub_regctxs);
+        regctx.next_cid = next_cid;
     }
+
+    (sub_regctxs, regctx.next_cid)
 }
 
-fn register_env(regctx: &mut RegisterCtx, ast_env: ast::Env) {
-    assert_eq!(regctx.consts.len(), regctx.scope.next_cid());
+fn register_env(regctx: &mut RegisterCtx, ast_env: ast::Env, is_local: bool) -> Vec<(ast::Module, Loc)> {
+    let mut child_modules = Vec::new();
 
     let ast::Env(statements) = ast_env;
     for (statement, l) in statements {
-        let result = register_statement(regctx, statement, l);
-        regctx.errors.extend( result.err() );
+        let result = register_statement(regctx, statement, l, is_local);
+
+        if let Ok(child_module) = result {
+            child_modules.extend(child_module);
+        }
+        else {
+            regctx.errors.extend( result.err() );
+        }
     }
+
+    child_modules
 }
 
-fn register_statement(regctx: &mut RegisterCtx, statement: ast::Statement, l: Loc)
-    -> Result<(), TranslateErr>
+fn register_statement(regctx: &mut RegisterCtx, statement: ast::Statement, l: Loc, is_local: bool)
+    -> Result<Option<(ast::Module, Loc)>, TranslateErr>
 {
     use std::iter;
 
@@ -457,16 +516,29 @@ fn register_statement(regctx: &mut RegisterCtx, statement: ast::Statement, l: Lo
                 } ).collect::<Result<_,TranslateErr>>()?;
 
             regctx.datatype_info.insert(datatype_cid, DataTypeInfo{ctors: ctors_id, params});
+            Ok(None)
         }
         ast::Statement::Def(lhs,rhs) => {
             let (name, params, ret_type) = decompose_defun(lhs)?;
             register_const( regctx, iter::empty(), name.0, UntranslatedConst::Def{params, ret_type, rhs}, l )?;
+            Ok(None)
         }
-        ast::Statement::Typing(ast::Typing{x,T}) =>
-            regctx.typings.push(UntranslatedTyping{typed: x, type_: T}),
-    };
+        ast::Statement::Typing(ast::Typing{x,T}) => {
+            regctx.typings.push(UntranslatedTyping{typed: x, type_: T});
+            Ok(None)
+        },
+        ast::Statement::Module{header, env} => {
+            assert!(regctx.ac.is_empty());
 
-    Ok(())
+            if is_local {
+                return Err((TranslateErrWithoutLoc::ModuleDefInLocalScope, l));
+            }
+
+            let (name, name_loc) = coerce_ident(header).and_then(|i| coerce_name(i).map_err(|e| e.into()))?;
+
+            Ok(Some((ast::Module{env, name, children: vec![]}, name_loc)))
+        },
+    }
 }
 
 fn register_const<Q: IntoIterator<Item=String> + Clone>(
@@ -476,12 +548,13 @@ fn register_const<Q: IntoIterator<Item=String> + Clone>(
 )
     -> Result<core::ConstId, TranslateErr>
 {
-    let cid = regctx.scope.next_cid();
-    assert_eq!(cid - regctx.scope.base_cid(), regctx.consts.len());
+    let cid = regctx.next_cid;
 
-    Rc::make_mut(&mut regctx.scope).register_const(qualifier, identifier)
+    Rc::make_mut(&mut regctx.scope).register_const(qualifier, identifier, cid)
         .map_err(|s| (TranslateErrWithoutLoc::UndefinedModule{name: s}, loc.clone()))?;
     regctx.consts.push((c, loc));
+
+    regctx.next_cid += 1;
 
     Ok(cid)
 }
@@ -551,9 +624,10 @@ pub(crate) struct RegisterCtx {
     ctor_info: HashMap<core::ConstId, CtorInfo>,
     datatype_info: HashMap<core::ConstId, DataTypeInfo>,
     errors: Vec<TranslateErr>,
+    next_cid: ::core::ConstId,
 }
 impl RegisterCtx {
-    fn new(scope: core::modules::Scope) -> Self {
+    fn new(scope: core::modules::Scope, next_cid: ::core::ConstId) -> Self {
         RegisterCtx {
             env: core::Env::new(),
             scope: Rc::new(scope),
@@ -563,6 +637,7 @@ impl RegisterCtx {
             ctor_info: HashMap::new(),
             datatype_info: HashMap::new(),
             errors: Vec::new(),
+            next_cid,
         }
     }
 

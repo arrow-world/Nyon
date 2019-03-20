@@ -157,6 +157,7 @@ pub enum Statement {
     // InfixPrio{head: Ident, tail: Vec<Ident>},
     Def(TermWithLoc, TermWithLoc),
     Typing(Typing),
+    Module{header: TermWithLoc, env: Env},
 }
 impl fmt::Display for Statement {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
@@ -178,6 +179,7 @@ impl fmt::Display for Statement {
             }, */
             Statement::Def(l,r) => write!(f, "{} := {}", l, r),
             Statement::Typing(Typing{x,T}) => write!(f, "{} : {}", x, T),
+            Statement::Module{header, env} => write!(f, "module {} {{\n{}\n}}", header, env),
         }
     }
 }

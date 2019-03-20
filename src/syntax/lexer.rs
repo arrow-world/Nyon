@@ -10,6 +10,7 @@ pub enum Token {
     Op(Op),
     Lit(Lit),
     Indent{lvl: usize},
+    Comment,
 }
 
 #[derive(Clone, PartialEq, Eq, Debug)]
@@ -75,7 +76,9 @@ pub enum Lit {
 }
 
 pub fn lex_src(src: &str) -> Result<Vec<TokenWithPos>, easy::Errors<char, &str, SourcePosition>> {
-    top_level().skip(eof()).easy_parse(State::new(src)).map(|x| x.0)
+    top_level().skip(eof()).easy_parse(State::new(src)).map( |(tokens, _)| 
+        tokens.into_iter().filter(|t| t.token != Token::Comment).collect()
+    )
 }
 
 fn top_level<I>() -> impl Parser<Input = I, Output = Vec<TokenWithPos>>
@@ -143,6 +146,7 @@ fn lex<I>() -> impl Parser<Input = I, Output = TokenWithPos>
         .or(many1::<String,_>(op_char()).map(|s| Op::Other(s)));
 
     let token = || choice((
+        attempt( comment().map(|_| Token::Comment) ),
         attempt( kw().map(|kw| Token::Keyword(kw)) ),
         attempt( ident().map(|s| Token::Ident(s)) ),
         attempt( sep().map(|sep| Token::Sep(sep)) ),
@@ -229,7 +233,7 @@ fn paren_comment_<I>() -> impl Parser<Input = I, Output = ()>
           I::Error: ParseError<I::Item, I::Range, I::Position>,
 {
     string("(*").with(many::<(),_>(not_followed_by(string("*)")).with(
-        paren_comment().or(any().with(value(())))
+        attempt(paren_comment()).or(any().with(value(())))
     ))).skip(string("*)"))
 }
 

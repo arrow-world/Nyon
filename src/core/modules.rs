@@ -9,7 +9,6 @@ pub struct Scope {
     module: Rc<RefCell<Module>>,
     names: Vec<Name>,
     parent: Option< Rc<Scope> >,
-    base_cid: ConstId,
 }
 impl Scope {
     pub fn top() -> Self {
@@ -17,7 +16,6 @@ impl Scope {
             module: Rc::new(RefCell::new(Module::anonymous_top())),
             names: Vec::new(),
             parent: None,
-            base_cid: 0,
         }
     }
 
@@ -25,14 +23,13 @@ impl Scope {
         Scope {
             module,
             names: Vec::new(),
-            base_cid: parent.base_cid + parent.names.len(),
             parent: Some(parent),
         }
     }
 
     pub fn resolve<'b, Q: IntoIterator<Item=&'b str> + Clone>(&self, qualifier: Q, identifier: &str) -> Option<ConstId>
     {
-        search_const(&self.module, qualifier.clone(), identifier).map(|offset| self.base_cid + offset)
+        search_const(&self.module, qualifier.clone(), identifier)
             .or_else(|| self.parent.clone().and_then(|parent| parent.resolve(qualifier, identifier)))
     }
 
@@ -42,11 +39,9 @@ impl Scope {
 
     pub fn module(&self) -> Rc<RefCell<Module>> { self.module.clone() }
 
-    pub fn register_const<Q: IntoIterator<Item=String> + Clone>(&mut self, qualifier: Q, identifier: String) 
-        -> Result<ConstId, String>
+    pub fn register_const<Q>(&mut self, qualifier: Q, identifier: String, cid: ConstId) -> Result<ConstId, String>
+        where Q: IntoIterator<Item = String> + Clone
     {
-        let cid = self.next_cid();
-
         let qualifier: Vec<String> = qualifier.into_iter().collect();
         let module = search_module(&self.module, qualifier.iter().map(|s| s.as_str()))?;
 
@@ -78,9 +73,6 @@ impl Scope {
         module.borrow_mut().register_namedhole(id, name.name);
         Ok(())
     }
-
-    pub fn base_cid(&self) -> ConstId { self.base_cid }
-    pub fn next_cid(&self) -> ConstId { self.base_cid + self.names.len() }
 
     pub fn names(&self) -> &[Name] { &self.names }
 }

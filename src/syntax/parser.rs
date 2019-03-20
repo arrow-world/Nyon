@@ -25,6 +25,11 @@ fn env_<I>(indent_lvl: i64) -> impl Parser<Input = I, Output = ast::Env>
         .and(compound(|inner_indent_lvl| expr(inner_indent_lvl), indent_lvl, lexer::Token::Op(lexer::Op::VertialBar)))
         .map(|(header, ctors)| ast::Statement::Datatype{header, ctors: ctors.into_iter().map(|(t, _loc)| t).collect()});
     
+    let def_module = move |indent_lvl: i64|
+        token(lexer::Token::Keyword(lexer::Keyword::Module)).skip(lfs()).with(expr(indent_lvl))
+        .and(env(indent_lvl))
+        .map(|(header, body)| ast::Statement::Module{header, env: body});
+    
     /* let def_infix = || token(lexer::Token::Keyword(lexer::Keyword::Infix)).skip(lfs())
         .with(userdefop()).skip(lfs())
         .and(ident())
@@ -37,6 +42,7 @@ fn env_<I>(indent_lvl: i64) -> impl Parser<Input = I, Output = ast::Env>
 
     let statement = move |indent_lvl: i64| choice((
         attempt( def_datatype(indent_lvl) ),
+        attempt( def_module(indent_lvl) ),
         // attempt( def_infix() ),
         // attempt( infix_prio() ),
         attempt( def(indent_lvl) ).map(|(l,r)| ast::Statement::Def(l,r)),
