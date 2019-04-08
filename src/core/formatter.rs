@@ -9,6 +9,13 @@ fn write_indent(f: &mut fmt::Formatter, lvl: usize) -> fmt::Result {
     Ok(())
 }
 
+fn write_arg(f: &mut fmt::Formatter, arg: String, implicity: u8) -> fmt::Result {
+    for _ in 0..implicity { write!(f, "{{")?; }
+    write!(f, "{}", arg)?;
+    for _ in 0..implicity { write!(f, "}}")?; }
+    Ok(())
+}
+
 impl fmt::Display for HoledTerm {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         fn with_indent(self_: &HoledTerm, lvl: usize, f: &mut fmt::Formatter) -> fmt::Result {
@@ -18,17 +25,21 @@ impl fmt::Display for HoledTerm {
                 HoledTerm::Const(const_id) => write!(f, "#{}", const_id),
                 HoledTerm::DBI(i) => write!(f, "@{}", i),
                 HoledTerm::Universe => write!(f, "Type"),
-                HoledTerm::App{s, t, implicit} => {
-                    if *implicit { write!(f, "{} {{{}}}", s.0, t.0) }
-                    else { write!(f, "{} {}", s.0, t.0) }
+                HoledTerm::App{s, t, implicity} => {
+                    write!(f, "{} ", s.0)?;
+                    write_arg(f, format!("{}", t.0), *implicity)
                 },
-                HoledTerm::Lam(HoledAbs{A,t}, implicit) => {
-                    if *implicit { write!(f, "(\\{{_:{}}} -> {})", A.0, t.0) }
-                    else { write!(f, "(\\_:{} -> {})", A.0, t.0) }
+                HoledTerm::Lam(HoledAbs{A,t}, implicity) => {
+                    write!(f, "(\\")?;
+                    write_arg(f, format!("{}", A.0), *implicity)?;
+                    write!(f, " -> {})", t.0)
                 },
-                HoledTerm::Pi(HoledAbs{A,t}, implicit) => {
-                    if *implicit { write!(f, "({{_:{}}} -> {})", A.0, t.0) }
-                    else { write!(f, "((_:{}) -> {})", A.0, t.0) }
+                HoledTerm::Pi(HoledAbs{A,t}, implicity) => {
+                    write!(f, "(")?;
+                    if *implicity == 0 { write!(f, "(")?; }
+                    write_arg(f, format!("{}", A.0), *implicity)?;
+                    if *implicity == 0 { write!(f, ")")?; }
+                    write!(f, " -> {})", t.0)
                 },
                 HoledTerm::Let{env, t} => {
                     writeln!(f, "let {{")?;
@@ -62,13 +73,9 @@ impl HoledEnv {
                 },
                 HoledConst::DataType{param_types, type_, ..} => {
                     write!(f, "data #{}", id)?;
-                    for ((param_type, _loc), implicit) in param_types {
-                        if *implicit {
-                            write!(f, " '{{{}}}", param_type)?;
-                        }
-                        else {
-                            write!(f, " '{}", param_type)?;
-                        }
+                    for ((param_type, _loc), implicity) in param_types {
+                        write!(f, " '")?;
+                        write_arg(f, format!("{}", param_type), *implicity)?;
                     }
                     writeln!(f, " : {} {{ ... }}", type_.0)?
                 },
@@ -114,9 +121,22 @@ impl fmt::Display for Expr {
                 Expr::Const(const_id) => write!(f, "#{}", const_id),
                 Expr::DBI(i) => write!(f, "@{}", i),
                 Expr::Universe => write!(f, "Type"),
-                Expr::App{s,t} => write!(f, "({} {})", s, t),
-                Expr::Lam(InferAbs{A,t}) => write!(f, "(\\:{} -> {})", A, t),
-                Expr::Pi(InferAbs{A,t}) => write!(f, "(|:{}| {})", A, t),
+                Expr::App{s,t,implicity} => {
+                    write!(f, "{}", s)?;
+                    write_arg(f, format!("{}", t), *implicity)
+                },
+                Expr::Lam(InferAbs{A,t}, implicity) => {
+                    write!(f, "(\\")?;
+                    write_arg(f, format!("{}", A), *implicity)?;
+                    write!(f, " -> {})", t)
+                },
+                Expr::Pi(InferAbs{A,t}, implicity) => {
+                    write!(f, "(")?;
+                    if *implicity == 0 { write!(f, "(")?; }
+                    write_arg(f, format!("{}", A), *implicity)?;
+                    if *implicity == 0 { write!(f, ")")?; }
+                    write!(f, " -> {})", t)
+                },
                 Expr::Let{env, t} => {
                     writeln!(f, "(let {{")?;
                     fmt_infer_env(env, f, lvl+1)?;
@@ -152,11 +172,12 @@ fn fmt_infer_env(env: &InferEnv, f: &mut fmt::Formatter, lvl: usize) -> fmt::Res
         match c.c {
             InferConst::Def(ref t) => writeln!(f, "#{} := {} : {}", id, t.0, c.type_.0)?,
             InferConst::DataType{ref param_types, ..} => {
-                write!(f, "datatype #{} : {}", id, c.type_.0)?;
-                for param_type in param_types {
-                    write!(f, " @:{}", param_type)?;
+                write!(f, "datatype #{}", id)?;
+                for (param_type, i) in param_types {
+                    write!(f, " '")?;
+                    write_arg(f, format!("{}", param_type.0), *i)?;
                 }
-                writeln!(f, " {{ ... }}")?;
+                writeln!(f, " : {} {{ ... }}", c.type_.0)?;
             },
             InferConst::Ctor{ref datatype} => 
                 write!(f, "#{}.#{} : {}", datatype, id, c.type_.0)?,

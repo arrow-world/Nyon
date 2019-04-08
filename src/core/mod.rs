@@ -6,6 +6,7 @@ pub mod explicit_subst;
 pub mod unification;
 pub mod serialize;
 pub mod errors;
+pub mod gadts;
 
 pub(crate) use self::typechk::HoledTerm;
 

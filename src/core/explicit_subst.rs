@@ -51,11 +51,12 @@ pub(super) fn subst(s: Subst, e: (Rc<Expr>, Loc)) -> (Rc<Expr>, Loc) {
         (Subst::Shift(m), Expr::DBI(k)) => (Rc::new(Expr::DBI(k + m)), None),
         (Subst::Dot(e,s), Expr::DBI(0)) => subst(Subst::identity(), e),
         (Subst::Dot(e,s), Expr::DBI(k)) => subst((*s).clone(), (Rc::new(Expr::DBI(k-1)), None)),
-        (s, Expr::Pi(a)) => (Rc::new(Expr::Pi(subst_abs(s, &a))), None),
-        (s, Expr::Lam(a)) => (Rc::new(Expr::Lam(subst_abs(s, &a))), None),
-        (s, Expr::App{s: t, t: u}) => (Rc::new( Expr::App {
+        (s, Expr::Pi(a,i)) => (Rc::new(Expr::Pi(subst_abs(s, &a), i)), None),
+        (s, Expr::Lam(a,i)) => (Rc::new(Expr::Lam(subst_abs(s, &a), i)), None),
+        (s, Expr::App{s: t, t: u, implicity}) => (Rc::new( Expr::App {
             s: subst_typed(s.clone(), &t),
             t: subst_typed(s, &u),
+            implicity,
         } ), None),
         (s, Expr::Let{..}) => unimplemented!(),
         (s, Expr::Case{..}) => unimplemented!(),

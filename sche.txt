@@ -1,9 +1,6 @@
--3/16 implement unification with implicit arguments and datatype positivity check
-
-3/17-3/20 implement match expression with exhaustivity check
-
-3/21-24 implement the remaining features and develop stdlib
-
-3/25-27 complete compiler
-
-3/28-30 develop tract lib
+implement unification with implicit arguments and datatype positivity check
+implement match expression with exhaustivity check
+implement the remaining features and develop stdlib
+implement LLVM code generator
+complete compiler
+develop tract lib

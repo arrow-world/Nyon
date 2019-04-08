@@ -130,10 +130,10 @@ fn translate_literal(lit: Lit, regctx: &mut RegisterCtx) -> Result<Rc<HoledTerm>
                         s:  (Rc::new( HoledTerm::App {
                                 s: cons.clone(),
                                 t: translate_term(head, regctx)?,
-                                implicit: false
+                                implicity: 0
                             } ), None),
                         t: (t, None),
-                        implicit: false,
+                        implicity: 0,
                     }
                 ))
             } )?

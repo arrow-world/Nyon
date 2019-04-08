@@ -90,7 +90,7 @@ fn translate_const(c: UntranslatedConst, id: core::ConstId, regctx: &mut Registe
                 let gadt_params_len = params.len();
 
                 let type_ = translate_parametric_term(
-                    ret_type.unwrap_or(ast::TermWithLoc{term: Box::new(ast::Term::Hole(None)), start: 0, end: 0}),
+                    ret_type.unwrap_or(ast::TermWithLoc{term: Box::new(ast::Term::Universe), start: 0, end: 0}),
                     params.into_iter(), regctx, |abs, implicit| typechk::HoledTerm::Pi(abs, implicit),
                 )?;
 
@@ -114,7 +114,7 @@ fn translate_const(c: UntranslatedConst, id: core::ConstId, regctx: &mut Registe
                 datatype_params.iter().enumerate().filter(|(i,_)| occurred.contains(i)).map(|(_,p)| p.clone());
             
             let translated_type = translate_parametric_term(type_, datatype_params_part, regctx,
-                |abs, _implicit| typechk::HoledTerm::Pi(abs, true))?;
+                |abs, _implicit| typechk::HoledTerm::Pi(abs, 2))?;
             
             typechk::HoledConst::Ctor{datatype, type_: translated_type}
         },
@@ -216,7 +216,7 @@ pub(crate) fn translate_term(term_withloc: ast::TermWithLoc, regctx: &mut Regist
                     Ok(( Rc::new(core::HoledTerm::App{
                         s: f,
                         t: translate_term(x, regctx)?,
-                        implicit
+                        implicity: if implicit {1} else {0}
                     }), loc_range(f_start, x_end) ))
                 },
             )?.0
@@ -226,12 +226,12 @@ pub(crate) fn translate_term(term_withloc: ast::TermWithLoc, regctx: &mut Regist
             t: translate_term(x, regctx)?,
         } )*/
         ast::Term::Lam{x, A, t} =>
-            Rc::new( core::HoledTerm::Lam(translate_abs(coerce_name(x)?, A, t, regctx)?, false) ),
+            Rc::new( core::HoledTerm::Lam(translate_abs(coerce_name(x)?, A, t, regctx)?, 0) ),
         ast::Term::Pi{x, A, B, implicit} =>
-            Rc::new( core::HoledTerm::Pi(translate_abs(coerce_name(x)?, A, B, regctx)?, implicit) ),
+            Rc::new( core::HoledTerm::Pi(translate_abs(coerce_name(x)?, A, B, regctx)?, if implicit {1} else {0}) ),
         ast::Term::Arrow{A, B} => {
             // Adds anonymous dummy variable to abstraction context for alignment of De-Bruijn-Indices.
-            Rc::new( core::HoledTerm::Pi(translate_arrow(A, B, regctx)?, false) )
+            Rc::new( core::HoledTerm::Pi(translate_arrow(A, B, regctx)?, 0) )
         },
         ast::Term::Typing(ast::Typing{x,T}) => {
             let x = translate_term(x, regctx)?;
@@ -402,12 +402,12 @@ fn translate_arrow(A: ast::TermWithLoc, t: ast::TermWithLoc, regctx: &mut Regist
 fn translate_parametric_term<I, F>(term: ast::TermWithLoc, params: I, regctx: &mut RegisterCtx, abs_term: F)
     -> Result<(Rc<typechk::HoledTerm>, Loc), TranslateErr>
     where I: DoubleEndedIterator<Item = Param>,
-          F: Fn(typechk::HoledAbs, bool) -> typechk::HoledTerm + Clone,
+          F: Fn(typechk::HoledAbs, u8) -> typechk::HoledTerm + Clone,
 {
     fn translate_rest<I,F>(term: ast::TermWithLoc, mut params: I, regctx: &mut RegisterCtx, abs_term: F)
         -> Result<(Rc<typechk::HoledTerm>, Loc), TranslateErr>
         where I: Iterator<Item = Param>,
-            F: Fn(typechk::HoledAbs, bool) -> typechk::HoledTerm + Clone,
+            F: Fn(typechk::HoledAbs, u8) -> typechk::HoledTerm + Clone,
     {
         let hole = Rc::new(typechk::HoledTerm::Hole(None));
         if let Some(param) = params.next() {
@@ -420,7 +420,7 @@ fn translate_parametric_term<I, F>(term: ast::TermWithLoc, params: I, regctx: &m
 
             regctx.ac_push_temporary( param.name, |regctx, _name| Ok( Rc::new(abs_term.clone()(
                 typechk::HoledAbs{A, t: translate_rest(term.clone(), params, regctx, abs_term)?},
-                implicit,
+                if implicit {1} else {0},
             )) ) )
                 .map( |t| (t, loc(&term)) )
         }
@@ -742,7 +742,7 @@ fn unfold_app_chain(app_chain: ast::TermWithLoc) -> (ast::TermWithLoc, Vec<(ast:
 }
 
 fn unfold_pi_chain(pi_chain: (Rc<typechk::HoledTerm>, Loc), len: usize)
-    -> (Vec<((Rc<typechk::HoledTerm>, Loc), bool)>, (Rc<typechk::HoledTerm>, Loc))
+    -> (Vec<((Rc<typechk::HoledTerm>, Loc), u8)>, (Rc<typechk::HoledTerm>, Loc))
 {
     let mut count = 0;
 
