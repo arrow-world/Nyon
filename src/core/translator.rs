@@ -81,7 +81,7 @@ fn translate_const(c: UntranslatedConst, id: core::ConstId, regctx: &mut Registe
                 type_:
                     translate_parametric_term(
                         ret_type.unwrap_or(ast::TermWithLoc{term: Box::new(ast::Term::Hole(None)), start: 0, end: 0}),
-                        params, regctx, |abs,_| (*abs.t.0).clone(),
+                        params, regctx, |abs, implicit| typechk::HoledTerm::Pi(abs, implicit),
                     )?,
             }
         },

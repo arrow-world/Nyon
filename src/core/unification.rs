@@ -45,6 +45,9 @@ pub(super) fn unify_supported_implicity(
     if let Expr::Pi(..) = *b.0 {
         ::std::mem::swap(&mut a, &mut b);
     }
+    if let Expr::App{..} = *b.0 {
+        ::std::mem::swap(&mut a, &mut b);
+    }
     if let Expr::Infer{..} = *b.0 {
         ::std::mem::swap(&mut a, &mut b);
     }
@@ -100,7 +103,15 @@ pub(super) fn unify_supported_implicity(
                 unify_typed(t_a.clone(), t_b.clone(), ctx, next_inferterm_id, substs, enable_implicit)
                     .map_err( |e| UnifyErr::InApp(Box::new(e)) )?;
             },
-            _ => return Err( UnifyErr::InApp(Box::new(UnifyErr::TermStructureMismatched)) ),
+            _ =>
+                if ia == 0 {
+                    return Err( UnifyErr::InApp(Box::new(UnifyErr::TermStructureMismatched)) );
+                }
+                else {
+                    return unify_supported_implicity(
+                        s_a.tower[0].clone(), b.clone(), ctx, next_inferterm_id, substs, enable_implicit
+                    );
+                },
         }
         Expr::Lam(InferAbs{A: ref A_a, t: ref t_a}, ia) => match *b.0 {
             Expr::Lam(InferAbs{A: ref A_b, t: ref t_b}, ib) if ia == ib => {

@@ -9,27 +9,6 @@ data List {a:Type} where
 lnil := List.nil
 lcons := List.cons
 
-(*
-    c : List := List.nil
-        chk List.nil : List
-            [] unify ({{Type}} -> List{0}) List
-                [Type] unify (List{0}) List
-                unification defer.
-            unification successful. implicit: [{{Type}}]
-            chk List : Type
-                [] unify ({Type} -> Type) Type
-                    [Type] unify Type Type
-                    unification successful. implicit: []
-                unification successful. implicit: [{Type}]
-            typechk successful. List {?0:Type} : Type
-        typechk successful. List.nil {{?1:Type}} : List {?0:Type}
-    c : List {?0:Type} := List.nil {{?1:Type}}
-        chk List.nil {{?1:Type}} : List {?0:Type}
-            [] unify List{?1} List{?0}
-            ?1 = ?0
-    c : List {?0:Type} := List.nil {{?0:Type}}
-*)
-
 data Option {a:Type} where
     some : a -> Option{a}
     none : Option{a}

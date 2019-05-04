@@ -608,115 +608,372 @@ fn typechk_term_supported_implicity(
 )
     -> Result<(Option<(Rc<Expr>, Loc)>, Option<(Rc<Expr>, Loc)>), TypeChkErr>
 {
+    let unify_supported_implicity_local =
+        |   a: (Rc<Expr>, Loc), b: (Rc<Expr>, Loc), for_term: bool,
+            term, ctx: &InferCtx, next_inferterm_id: &mut InferTermId, substs: &mut Vec<Equal>  |
+    {
+        let (new_higher, iparams) = unify_supported_implicity(a, b, ctx, next_inferterm_id, substs, enable_implicit)?;
+
+        let new_lower =
+            if iparams.is_empty() { None }
+            else { Some(insert_implicit_args(term, iparams, next_inferterm_id)) };
+
+        if for_term {
+            assert!(new_lower.is_none());
+            Ok((new_higher, None))
+        }
+        else {
+            Ok((new_lower, new_higher))
+        }
+    };
+
     debug!("Checks {} ...", InferTypedTerm{tower: vec![term.clone(), type_.clone()]});
     // debug!("{}", ctx);
 
     match (*term.0).clone() {
         Expr::Const(const_id) =>
-            unify(type_.clone(), ctx.consts[const_id].type_.clone(), ctx, next_inferterm_id, substs)?,
-        Expr::DBI(i) => unify(type_.clone(), ctx.local(i).tower[0].clone(), ctx, next_inferterm_id, substs)?,
+            return unify_supported_implicity_local(
+                type_.clone(), ctx.consts[const_id].type_.clone(), false,
+                term, ctx, next_inferterm_id, substs,
+            ),
+        Expr::DBI(i) =>
+            return unify_supported_implicity_local(
+                type_.clone(), ctx.local(i).tower[0].clone(), false,
+                term, ctx, next_inferterm_id, substs,
+            ),
         Expr::Universe =>
-            unify(type_.clone(), term.clone(), ctx, next_inferterm_id, substs)?,
+            return unify_supported_implicity_local(
+                type_.clone(), (Rc::new(Expr::Universe), None), false,
+                term, ctx, next_inferterm_id, substs,
+            ),
         Expr::App{s: ref t, t: ref u, implicity} => {
-            typechk_term(ctx, t, substs, next_inferterm_id)?;
-            typechk_term(ctx, u, substs, next_inferterm_id)?;
+            let new_tt_from_t = |tt, next_inferterm_id: &mut InferTermId| {
+                new_tt(tt, next_inferterm_id, t,
+                    |new_t_term, new_t_type|
+                        Expr::App {
+                            s: InferTypedTerm{tower: vec![ new_t_term, new_t_type ]},
+                            t: u.clone(),
+                            implicity,
+                        },
+                    &term,
+                )
+            };
+            let new_tt_from_u = |tt, next_inferterm_id: &mut InferTermId| {
+                new_tt(tt, next_inferterm_id, u,
+                    |new_u_term, new_u_type|
+                        Expr::App {
+                            s: t.clone(),
+                            t: InferTypedTerm{tower: vec![ new_u_term, new_u_type ]},
+                            implicity,
+                        },
+                    &term,
+                )
+            };
+
+            if let Some(tt) = new_tt_from_t(
+                typechk_term_supported_implicity(ctx, t.tower[0].clone(), t.tower[1].clone(),
+                    substs, next_inferterm_id, enable_implicit)?,
+                next_inferterm_id,
+            ) {
+                return Ok(tt);
+            }
+
+            if let Some(tt) = new_tt_from_u(
+                typechk_term_supported_implicity(ctx, u.tower[0].clone(), u.tower[1].clone(),
+                    substs, next_inferterm_id, enable_implicit)?,
+                next_inferterm_id,
+            ) {
+                return Ok(tt);
+            }
             
             let T = (Rc::new(new_inferterm(next_inferterm_id)), None);
             let universe = (Rc::new(Expr::Universe), None);
 
-            let (new_type, iparams) = unify_supported_implicity(
-                t.tower[1].clone(),
-                (Rc::new( Expr::Pi( InferAbs {
-                    A: InferTypedTerm{tower: vec![ u.tower[1].clone(), universe.clone() ]},
-                    t: InferTypedTerm{tower: vec![ T.clone(), universe ]},
-                }, implicity ) ), None),
-                ctx, next_inferterm_id, substs, true,
-            )?;
-
-            if !enable_implicit {
-                assert!(new_type.is_none());
-                assert!(iparams.is_empty());
+            if let Some(tt) = new_tt_from_t(
+                unify_supported_implicity_local(
+                    t.tower[1].clone(),
+                    (Rc::new( Expr::Pi( InferAbs {
+                        A: InferTypedTerm{tower: vec![ u.tower[1].clone(), universe.clone() ]},
+                        t: InferTypedTerm{tower: vec![ T.clone(), universe ]},
+                    }, implicity ) ), None),
+                    false,
+                    t.tower[0].clone(), ctx, next_inferterm_id, substs,
+                )?,
+                next_inferterm_id,
+            ) {
+                return Ok(tt);
             }
 
-            let mut new_term = None;
+            let type__ = Rc::new( Expr::Subst(
+                Subst::from_expr(u.tower[0].clone()),
+                T.clone(),
+            ) );
 
-            if iparams.is_empty() {
-                let type__ = Rc::new( Expr::Subst(
-                    Subst::from_expr(u.tower[0].clone()),
-                    T.clone(),
-                ) );
-                unify(type_.clone(), (type__, None), ctx, next_inferterm_id, substs)?;
-            }
-            else {
-                new_term = Some(insert_implicit_args(term, iparams, next_inferterm_id));
-            }
-
-            return Ok((new_term, new_type));
+            return Ok( unify_supported_implicity_local(
+                type_.clone(), (type__, None), false,
+                term.clone(), ctx, next_inferterm_id, substs
+            )? );
         },
         Expr::Lam(InferAbs{A: ref T, ref t}, implicity) => {
+            let new_tt_from_T = |tt, next_inferterm_id: &mut InferTermId| {
+                new_tt(tt, next_inferterm_id, T,
+                    |new_T_term, new_T_type|
+                        Expr::Lam( InferAbs {
+                                A: InferTypedTerm{tower: vec![ new_T_term, new_T_type ]},
+                                t: t.clone(),
+                            },
+                            implicity
+                        ),
+                    &term,
+                )
+            };
+            let new_tt_from_t = |tt, next_inferterm_id: &mut InferTermId| {
+                new_tt(tt, next_inferterm_id, t,
+                    |new_t_term, new_t_type|
+                        Expr::Lam( InferAbs {
+                                A: T.clone(),
+                                t: InferTypedTerm{tower: vec![ new_t_term, new_t_type ]},
+                            },
+                            implicity
+                        ),
+                    &term,
+                )
+            };
+
             let mut local_ctx = ctx.clone();
             local_ctx.local.push( subst_typed_lazily(Subst::Shift(1), T.clone()) );
 
-            typechk_term(ctx, T, substs, next_inferterm_id)?;
-            typechk_term(&local_ctx, t, substs, next_inferterm_id)?;
+            if let Some(tt) = new_tt_from_T(
+                typechk_term_supported_implicity(
+                    ctx, T.tower[0].clone(), T.tower[1].clone(),
+                    substs, next_inferterm_id, enable_implicit,
+                )?,
+                next_inferterm_id,
+            ) {
+                return Ok(tt);
+            }
+            
+            if let Some(tt) = new_tt_from_t(
+                typechk_term_supported_implicity(
+                    &local_ctx, t.tower[0].clone(), t.tower[1].clone(),
+                    substs, next_inferterm_id, enable_implicit,
+                )?,
+                next_inferterm_id,
+            ) {
+                return Ok(tt);
+            }
 
             let U = (Rc::new(new_inferterm(next_inferterm_id)), None);
 
-            unify(t.tower[1].clone(), U.clone(), &local_ctx, next_inferterm_id, substs)?;
+            if let Some(tt) = new_tt_from_t(
+                unify_supported_implicity_local(
+                    t.tower[1].clone(), U.clone(), false,
+                    t.tower[0].clone(), &local_ctx, next_inferterm_id, substs,
+                )?,
+                next_inferterm_id,
+            ) {
+                return Ok(tt);
+            }
 
             let type__ = Rc::new( Expr::Pi( InferAbs {
                 A: T.clone(),
                 t: InferTypedTerm{tower: vec![U, (Rc::new(Expr::Universe), None)]},
             }, implicity ) );
-            unify(type_.clone(), (type__, None), ctx, next_inferterm_id, substs)?;
+
+            return Ok( unify_supported_implicity_local(
+                type_.clone(), (type__, None), false,
+                term.clone(), ctx, next_inferterm_id, substs
+            )? );
         },
         Expr::Pi(InferAbs{A: ref T, t: ref U}, implicity) => {
+            let new_tt_from_T = |tt, next_inferterm_id: &mut InferTermId| {
+                new_tt(tt, next_inferterm_id, T,
+                    |new_T_term, new_T_type|
+                        Expr::Pi( InferAbs {
+                                A: InferTypedTerm{tower: vec![ new_T_term, new_T_type ]},
+                                t: U.clone(),
+                            },
+                            implicity
+                        ),
+                    &term,
+                )
+            };
+            let new_tt_from_U = |tt, next_inferterm_id: &mut InferTermId| {
+                new_tt(tt, next_inferterm_id, U,
+                    |new_U_term, new_U_type|
+                        Expr::Pi( InferAbs {
+                                A: T.clone(),
+                                t: InferTypedTerm{tower: vec![ new_U_term, new_U_type ]},
+                            },
+                            implicity
+                        ),
+                    &term,
+                )
+            };
+
             let mut local_ctx = ctx.clone();
             local_ctx.local.push( subst_typed_lazily(Subst::Shift(1), T.clone()) );
 
-            typechk_term(ctx, T, substs, next_inferterm_id)?;
-            typechk_term(&local_ctx, U, substs, next_inferterm_id)?;
+            if let Some(tt) = new_tt_from_T(
+                typechk_term_supported_implicity(
+                    ctx, T.tower[0].clone(), T.tower[1].clone(),
+                    substs, next_inferterm_id, enable_implicit,
+                )?,
+                next_inferterm_id,
+            ) {
+                return Ok(tt);
+            }
+
+            if let Some(tt) = new_tt_from_U(
+                typechk_term_supported_implicity(
+                    &local_ctx, U.tower[0].clone(), U.tower[1].clone(),
+                    substs, next_inferterm_id, enable_implicit,
+                )?,
+                next_inferterm_id,
+            ) {
+                return Ok(tt);
+            }
 
             let universe = (Rc::new(Expr::Universe), None);
 
-            unify(T.tower[1].clone(), universe.clone(), ctx, next_inferterm_id, substs)?;
-            unify(U.tower[1].clone(), universe.clone(), &local_ctx, next_inferterm_id, substs)?;
-            unify(type_.clone(), universe, ctx, next_inferterm_id, substs)?;
+            if let Some(tt) = new_tt_from_T(
+                unify_supported_implicity_local(
+                    T.tower[1].clone(), universe.clone(), false,
+                    T.tower[0].clone(), ctx, next_inferterm_id, substs,
+                )?,
+                next_inferterm_id,
+            ) {
+                return Ok(tt);
+            }
+
+            if let Some(tt) = new_tt_from_U(
+                unify_supported_implicity_local(
+                    U.tower[1].clone(), universe.clone(), false,
+                    U.tower[0].clone(), &local_ctx, next_inferterm_id, substs,
+                )?,
+                next_inferterm_id,
+            ) {
+                return Ok(tt);
+            }
+
+            return Ok( unify_supported_implicity_local(
+                type_.clone(), universe, false,
+                term.clone(), ctx, next_inferterm_id, substs,
+            )? );
         },
         Expr::Let{ref env, ref t} => {
             let mut local_ctx = ctx.clone();
             local_ctx.consts.extend(env.iter().cloned());
 
-            let base_const_id = ctx.consts.len();
-            for (offset, c) in env.iter().enumerate() {
-                typechk_const(ctx, c, /*base_const_id + offset,*/ substs, next_inferterm_id)?;
+            for (i, c) in env.iter().enumerate() {
+                if let Some(itc) = typechk_const(ctx, c, substs, next_inferterm_id)? {
+                    let mut new_env = env.clone();
+                    new_env[i] = itc;
+
+                    return Ok((
+                        Some(( Rc::new(Expr::Let{env: new_env, t: t.clone()}), None )),
+                        Some(( Rc::new(new_inferterm(next_inferterm_id)), None )),
+                    ));
+                }
             }
 
-            typechk_term(&local_ctx, t, substs, next_inferterm_id)?;
+            if let Some(tt) = new_tt(
+                typechk_term_supported_implicity(
+                    &local_ctx, t.tower[0].clone(), t.tower[1].clone(),
+                    substs, next_inferterm_id, enable_implicit,
+                )?,
+                next_inferterm_id, t,
+                |new_t_term, new_t_type| Expr::Let {
+                    env: env.clone(),
+                    t: InferTypedTerm{tower: vec![new_t_term, new_t_type]},
+                },
+                &term,
+            ) {
+                return Ok(tt);
+            }
 
-            unify(type_.clone(), t.tower[1].clone(), ctx, next_inferterm_id, substs)?;
+            return Ok( unify_supported_implicity_local(
+                type_.clone(), t.tower[1].clone(), false,
+                term.clone(), ctx, next_inferterm_id, substs,
+            )? );
         },
         Expr::Case{ref t, ref cases, ref datatype} => {
-            typechk_term(ctx, t, substs, next_inferterm_id)?;
-            for case in cases {
-                typechk_term(ctx, case, substs, next_inferterm_id)?;
+            let new_tt_from_t = |tt, next_inferterm_id: &mut InferTermId| {
+                new_tt(tt, next_inferterm_id, t,
+                    |new_t_term, new_t_type| Expr::Case {
+                        t: InferTypedTerm{tower: vec![new_t_term, new_t_type]},
+                        cases: cases.clone(),
+                        datatype: datatype.clone(),
+                    },
+                    &term,
+                )
+            };
+            let new_tt_from_case = |tt, next_inferterm_id: &mut InferTermId, case, ctor_no| {
+                new_tt(
+                    tt, next_inferterm_id, case,
+                    |new_case_term, new_case_type| {
+                        let mut new_cases = cases.clone();
+                        new_cases[ctor_no] = InferTypedTerm{tower: vec![new_case_term, new_case_type]};
+
+                        Expr::Case {
+                            t: t.clone(),
+                            cases: new_cases,
+                            datatype: datatype.clone(),
+                        }
+                    },
+                    &term,
+                )
+            };
+
+            if let Some(tt) = new_tt_from_t(
+                typechk_term_supported_implicity(
+                    ctx, t.tower[0].clone(), t.tower[1].clone(),
+                    substs, next_inferterm_id, enable_implicit
+                )?, next_inferterm_id,
+            ) {
+                return Ok(tt);
             }
 
             if let Some(datatype) = datatype {
-                unify(t.tower[1].clone(), (Rc::new(Expr::Const(*datatype)), None), ctx, next_inferterm_id, substs)?;
+                if let Some(tt) = new_tt_from_t(
+                    unify_supported_implicity_local(
+                        t.tower[1].clone(), (Rc::new(Expr::Const(*datatype)), None), false,
+                        t.tower[0].clone(), ctx, next_inferterm_id, substs,
+                    )?, next_inferterm_id,
+                ) {
+                    return Ok(tt);
+                }
 
-                let types_of_cases: Vec<(Rc<Expr>, Loc)> = cases.iter().enumerate().map( |(ctor_no, case)| {
-                    let type__ = Rc::new(new_inferterm(next_inferterm_id));
+                for (ctor_no, case) in cases.iter().enumerate() {
+                    if let Some(tt) = new_tt_from_case(
+                        typechk_term_supported_implicity(
+                            ctx, case.tower[0].clone(), case.tower[1].clone(),
+                            substs, next_inferterm_id, enable_implicit
+                        )?,
+                        next_inferterm_id, case, ctor_no,
+                    ) {
+                        return Ok(tt);
+                    }
 
                     let ctors =
                         if let InferConst::DataType{ref ctors, ..} = ctx.consts[*datatype].c { ctors }
                         else { unreachable!() };
                     
                     let type_of_ctor = ctx.consts[ctors[ctor_no]].type_.clone();
-                    unify(case.tower[1].clone(), type_of_ctor, ctx, next_inferterm_id, substs)?;
 
-                    Ok((type__, None))
-                } ).collect::<Result<_, UnifyErr>>()?;
+                    if let Some(tt) = new_tt_from_case(
+                        unify_supported_implicity_local(
+                            case.tower[1].clone(), type_of_ctor, false,
+                            case.tower[0].clone(), ctx, next_inferterm_id, substs,
+                        )?,
+                        next_inferterm_id, case, ctor_no,
+                    ) {
+                        return Ok(tt);
+                    }
+                }
+
+                let types_of_cases : Vec<_> = (0..cases.len())
+                    .map(|_| (Rc::new(new_inferterm(next_inferterm_id)), None)).collect();
 
                 let universe = (Rc::new(Expr::Universe), None);
 
@@ -728,15 +985,21 @@ fn typechk_term_supported_implicity(
                     datatype: Some(*datatype),
                 } );
 
-                unify(type_.clone(), (type__, None), ctx, next_inferterm_id, substs)?;
+                return Ok( unify_supported_implicity_local(
+                    type_.clone(), (type__, None), false,
+                    term.clone(), ctx, next_inferterm_id, substs
+                )? );
             }
         },
         Expr::Value(ref v) =>
-            unify(type_.clone(), match *v {
-                Value::Nat(..) => unimplemented!(),
-                Value::Int(..) => unimplemented!(),
-                Value::Str(..) => unimplemented!(),
-            }, ctx, next_inferterm_id, substs)?,
+            return unify_supported_implicity_local(
+                type_.clone(), match *v {
+                    Value::Nat(..) => unimplemented!(),
+                    Value::Int(..) => unimplemented!(),
+                    Value::Str(..) => unimplemented!(),
+                }, false,
+                term, ctx, next_inferterm_id, substs,
+            ),
         Expr::Infer{..} => (),
         Expr::Subst(..) => unreachable!(),
     }
@@ -752,6 +1015,28 @@ fn typechk_typing(ctx: &InferCtx, t: InferTypedTerm, T: InferTypedTerm,
     unify(T.tower[1].clone(), (Rc::new(Expr::Universe), None), ctx, next_inferterm_id, substs)?;
     Ok(())
 }
+
+fn new_tt <F> (
+    (new_orig_term, new_orig_type): (Option<(Rc<Expr>, Loc)>, Option<(Rc<Expr>, Loc)>),
+    next_inferterm_id: &mut InferTermId,
+    orig: &InferTypedTerm,
+    new_term: F,
+    term: &(Rc<Expr>, Loc)
+) -> Option<(Option<(Rc<Expr>, Loc)>, Option<(Rc<Expr>, Loc)>)>
+    where F: FnOnce((Rc<Expr>, Loc), (Rc<Expr>, Loc)) -> Expr
+{
+    if new_orig_term.is_some() || new_orig_type.is_some() {
+        let new_orig_term = new_orig_term.unwrap_or(orig.tower[0].clone());
+        let new_orig_type = new_orig_type.unwrap_or(orig.tower[1].clone());
+
+        Some( (
+            Some(( Rc::new(new_term(new_orig_term, new_orig_type)), term.1.clone() )),
+            Some(( Rc::new(new_inferterm(next_inferterm_id)), None )),
+        ) )
+    }
+    else { None }
+}
+
 
 pub(super) fn insert_implicit_args(
     term: (Rc<Expr>, Loc),

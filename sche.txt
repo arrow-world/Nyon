@@ -3,4 +3,4 @@ implement match expression with exhaustivity check
 implement the remaining features and develop stdlib
 implement LLVM code generator
 complete compiler
-develop tract lib
+develop signal lib
