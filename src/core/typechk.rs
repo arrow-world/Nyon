@@ -171,22 +171,22 @@ pub fn typechk(env: HoledEnv) -> Result<Env, TypeChkErr> {
                         if rhs == lhs { continue; }
                         assert!(lhs > rhs);
 
-                        if let Some(instance) = substs_map.remove(&lhs.get()) {
-                            if let Some(other) = substs_map.get(&rhs.get()) {
-                                unify(instance.clone(), other.clone(), &ctx, &mut next_inferterm_id, &mut substs)?;
+                        if let Some(mut instance) = substs_map.remove(&lhs.get()) {
+                            if let Some(other) = substs_map.get(&rhs.get()).cloned() {
+                                // unify(instance.clone(), other.clone(), &ctx, &mut next_inferterm_id, &mut substs)?;
+                                instance = (Rc::new(Expr::Equal(instance, other)), None)
                             }
                             substs_map.insert(rhs.get(), instance);
                         }
                         lhs.set(rhs.get());
                     },
-                    Equal::Instantiate(id, instance) => {
+                    Equal::Instantiate(id, mut instance) => {
                         if let Some(other) = substs_map.get(&id.get()).cloned() {
-                            unify(instance, other, &ctx, &mut next_inferterm_id, &mut substs)?;
+                            // unify(instance, other, &ctx, &mut next_inferterm_id, &mut substs)?;
+                            instance = (Rc::new(Expr::Equal(instance, other)), None);
                         }
-                        else {
-                            substs_map.insert(id.get(), instance);
-                        }
-                    }
+                        substs_map.insert(id.get(), instance);
+                    },
                     Equal::Defer(e0, e1, ctx) => defers.push((e0, e1, ctx)),
                 }
             }
@@ -404,6 +404,7 @@ fn cast_no_infer(ctx: InferCtx) -> Env {
                 (*cast_no_infer_term(f.0)).clone()
             },
             Expr::Infer{..} => unreachable!(),
+            Expr::Equal(..) => unreachable!(),
         } )
     }
 
@@ -629,6 +630,14 @@ fn typechk_term_supported_implicity(
 
     debug!("Checks {} ...", InferTypedTerm{tower: vec![term.clone(), type_.clone()]});
     // debug!("{}", ctx);
+
+    if let Expr::Equal(ref a, ref b) = *(type_.0) {
+        let (new_term, new_type) = unify_supported_implicity_local(
+            a.clone(), b.clone(), false,
+            term, ctx, next_inferterm_id, substs,
+        )?;
+        return Ok( (Some(new_term.unwrap_or(a.clone())), new_type) );
+    }
 
     match (*term.0).clone() {
         Expr::Const(const_id) =>
@@ -1002,6 +1011,13 @@ fn typechk_term_supported_implicity(
             ),
         Expr::Infer{..} => (),
         Expr::Subst(..) => unreachable!(),
+        Expr::Equal(a, b) => {
+            let (new_term, new_type) = unify_supported_implicity_local(
+                a.clone(), b.clone(), true,
+                term, ctx, next_inferterm_id, substs,
+            )?;
+            return Ok( (Some(new_term.unwrap_or(a.clone())), new_type) )
+        }
     }
 
     Ok((None, None))
@@ -1179,6 +1195,7 @@ pub(super) enum Expr {
     Value(Value),
     Infer{id: Rc<Cell<InferTermId>>},
     Subst(Subst, (Rc<Expr>, Loc)),
+    Equal((Rc<Expr>, Loc), (Rc<Expr>, Loc)),
 }
 
 #[derive(Clone, Debug)]

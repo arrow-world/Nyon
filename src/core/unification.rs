@@ -41,7 +41,7 @@ pub(super) fn unify_supported_implicity(
 
     try_subst(&mut a);
     try_subst(&mut b);
-
+    
     if let Expr::Pi(..) = *b.0 {
         ::std::mem::swap(&mut a, &mut b);
     }
@@ -52,6 +52,9 @@ pub(super) fn unify_supported_implicity(
         ::std::mem::swap(&mut a, &mut b);
     }
     if let Expr::Subst(..) = *b.0 {
+        ::std::mem::swap(&mut a, &mut b);
+    }
+    if let Expr::Equal(..) = *b.0 {
         ::std::mem::swap(&mut a, &mut b);
     }
 
@@ -128,6 +131,7 @@ pub(super) fn unify_supported_implicity(
                 else { return Err(UnifyErr::ValueMismatched(v_a.clone(), v_b.clone())) },
             _ => return Err(UnifyErr::TermStructureMismatched),
         },
+        Expr::Equal(..) => unreachable!(),
     };
 
     Ok((None, vec![]))
