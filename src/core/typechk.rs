@@ -543,47 +543,12 @@ fn typechk_const (
             let (new_term, new_type) = typechk_term_supported_implicity(ctx,
                 c.type_.clone(), (Rc::new(Expr::Universe), None), substs, next_inferterm_id, true)?;
             
-            assert!(new_type.is_none());
-
-            Ok(new_term.map( |new| InferTypedConst{type_: new, ..c.clone()} ))
-
-            /*
-            let datatype_param_types =
-                if let InferConst::DataType{ref param_types, ..} = ctx.consts[datatype].c { param_types }
-                else { unreachable!() };
-
-            let mut local_ctx = ctx.clone();
-            local_ctx.local.extend(datatype_param_types.iter().rev().cloned());
-
-            for param_type in param_types {
-                typechk_term(&local_ctx, param_type, substs, next_inferterm_id)?;
+            // assert!(new_type.is_none());
+            if let Some(new_type) = new_type {
+                debug!("new_type = {}", new_type.0);
             }
 
-            let universe = (Rc::new(Expr::Universe), None);
-
-            let type_ =
-                datatype_param_types.iter().chain(param_types).rev().fold(
-                    (0..datatype_param_types.len()).rev().fold( (Rc::new(Expr::Const(datatype)), None),
-                        |f, dbi_offset| (
-                            Rc::new( Expr::App {
-                                s: InferTypedTerm{tower: vec![f, (Rc::new(new_inferterm(next_inferterm_id)), None)]}, 
-                                t: InferTypedTerm { tower: vec![
-                                    (Rc::new(Expr::DBI(param_types.len() + dbi_offset)), None),
-                                    (Rc::new(new_inferterm(next_inferterm_id)), None),
-                                ] },
-                            } ),
-                            None,
-                        )
-                    ),
-                    |tail, param_type| (
-                        Rc::new( Expr::Pi( InferAbs {
-                            A: param_type.clone(),
-                            t: InferTypedTerm{tower: vec![tail, universe.clone()]},
-                        } ) ),
-                        None
-                    ),
-                );
-            */
+            Ok(new_term.map( |new| InferTypedConst{type_: new, ..c.clone()} ))
         },
     }
 }
@@ -609,6 +574,22 @@ fn typechk_term_supported_implicity(
 )
     -> Result<(Option<(Rc<Expr>, Loc)>, Option<(Rc<Expr>, Loc)>), TypeChkErr>
 {
+    typechk_term_supported_implicity_body(
+        ctx, term, type_, substs, next_inferterm_id, enable_implicit, false
+    )
+}
+
+fn typechk_term_supported_implicity_body(
+    ctx: &InferCtx,
+    term: (Rc<Expr>, Loc),
+    type_: (Rc<Expr>, Loc),
+    substs: &mut Vec<Equal>,
+    next_inferterm_id: &mut InferTermId,
+    enable_implicit: bool,
+    _ignore_type: bool,
+)
+    -> Result<(Option<(Rc<Expr>, Loc)>, Option<(Rc<Expr>, Loc)>), TypeChkErr>
+{
     let unify_supported_implicity_local =
         |   a: (Rc<Expr>, Loc), b: (Rc<Expr>, Loc), for_term: bool,
             term, ctx: &InferCtx, next_inferterm_id: &mut InferTermId, substs: &mut Vec<Equal>  |
@@ -631,12 +612,28 @@ fn typechk_term_supported_implicity(
     debug!("Checks {} ...", InferTypedTerm{tower: vec![term.clone(), type_.clone()]});
     // debug!("{}", ctx);
 
-    if let Expr::Equal(ref a, ref b) = *(type_.0) {
-        let (new_term, new_type) = unify_supported_implicity_local(
-            a.clone(), b.clone(), false,
-            term, ctx, next_inferterm_id, substs,
-        )?;
-        return Ok( (Some(new_term.unwrap_or(a.clone())), new_type) );
+    let univ = (Rc::new(Expr::Universe), None);
+
+    /* if !ignore_type {
+        let (new_type1, new_type2) =
+            typechk_term_supported_implicity_body(ctx, type_.clone(), univ.clone(),
+                substs, next_inferterm_id, enable_implicit, true)?;
+
+        if let Some(new_type2) = new_type2 {
+            debug!("new_type2 = {}", new_type2.0);
+        }
+
+        if let Some(new_type1) = new_type1 {
+            return Ok( (Some(term), Some(new_type1)) );
+        }
+    } */
+
+    {
+        let (new_term, new_type) = unify_equals_typed(term.clone(), type_.clone(), ctx, next_inferterm_id, substs)?;
+
+        if new_term.is_some() || new_type.is_some() {
+            return Ok( (new_term, new_type) );
+        }
     }
 
     match (*term.0).clone() {
@@ -696,14 +693,13 @@ fn typechk_term_supported_implicity(
             }
             
             let T = (Rc::new(new_inferterm(next_inferterm_id)), None);
-            let universe = (Rc::new(Expr::Universe), None);
 
             if let Some(tt) = new_tt_from_t(
                 unify_supported_implicity_local(
                     t.tower[1].clone(),
                     (Rc::new( Expr::Pi( InferAbs {
-                        A: InferTypedTerm{tower: vec![ u.tower[1].clone(), universe.clone() ]},
-                        t: InferTypedTerm{tower: vec![ T.clone(), universe ]},
+                        A: InferTypedTerm{tower: vec![ u.tower[1].clone(), univ.clone() ]},
+                        t: InferTypedTerm{tower: vec![ T.clone(), univ ]},
                     }, implicity ) ), None),
                     false,
                     t.tower[0].clone(), ctx, next_inferterm_id, substs,
@@ -843,11 +839,9 @@ fn typechk_term_supported_implicity(
                 return Ok(tt);
             }
 
-            let universe = (Rc::new(Expr::Universe), None);
-
             if let Some(tt) = new_tt_from_T(
                 unify_supported_implicity_local(
-                    T.tower[1].clone(), universe.clone(), false,
+                    T.tower[1].clone(), univ.clone(), false,
                     T.tower[0].clone(), ctx, next_inferterm_id, substs,
                 )?,
                 next_inferterm_id,
@@ -857,7 +851,7 @@ fn typechk_term_supported_implicity(
 
             if let Some(tt) = new_tt_from_U(
                 unify_supported_implicity_local(
-                    U.tower[1].clone(), universe.clone(), false,
+                    U.tower[1].clone(), univ.clone(), false,
                     U.tower[0].clone(), &local_ctx, next_inferterm_id, substs,
                 )?,
                 next_inferterm_id,
@@ -866,7 +860,7 @@ fn typechk_term_supported_implicity(
             }
 
             return Ok( unify_supported_implicity_local(
-                type_.clone(), universe, false,
+                type_.clone(), univ, false,
                 term.clone(), ctx, next_inferterm_id, substs,
             )? );
         },
@@ -984,13 +978,11 @@ fn typechk_term_supported_implicity(
                 let types_of_cases : Vec<_> = (0..cases.len())
                     .map(|_| (Rc::new(new_inferterm(next_inferterm_id)), None)).collect();
 
-                let universe = (Rc::new(Expr::Universe), None);
-
                 let type__ = Rc::new( Expr::Case {
                     t: t.clone(),
                     cases:
                         types_of_cases.into_iter()
-                            .map( |T| InferTypedTerm{tower: vec![T, universe.clone()]} ).collect(),
+                            .map( |T| InferTypedTerm{tower: vec![T, univ.clone()]} ).collect(),
                     datatype: Some(*datatype),
                 } );
 
@@ -1053,6 +1045,203 @@ fn new_tt <F> (
     else { None }
 }
 
+fn unify_equals_env(env: &InferEnv, ctx: &InferCtx, next_inferterm_id: &mut InferTermId, substs: &mut Vec<Equal>)
+    -> Result<Option<InferEnv>, TypeChkErr>
+{
+    let mut new_env = None;
+
+    let update_env = |new_env: &mut Option<InferEnv>, i, new_c| {
+        if new_env.is_none() {
+            *new_env = Some(env.clone());
+        }
+
+        new_env.as_mut().unwrap()[i] = new_c;
+    };
+
+    for (i, c) in env.iter().enumerate() {
+        match c.c {
+            InferConst::Def(ref t) => {
+                let (new_term, new_type) =
+                    unify_equals_typed(t.clone(), c.type_.clone(), ctx, next_inferterm_id, substs)?;
+                
+                if new_term.is_some() || new_type.is_some() {
+                    update_env(&mut new_env, i, InferTypedConst {
+                        c: InferConst::Def(new_term.unwrap_or(t.clone())),
+                        type_: new_type.unwrap_or(c.type_.clone()),
+                        ..c.clone()
+                    });
+                }
+            },
+            InferConst::DataType{ref param_types, ref type_, ref ctors} => {
+                let mut new_param_types = None;
+
+                for (idx, (param_type, i)) in param_types.iter().enumerate() {
+                    let (new, _) = unify_equals(param_type.clone(), None, ctx, next_inferterm_id, substs)?;
+
+                    if let Some(new) = new {
+                        if new_param_types.is_none() {
+                            new_param_types = Some(param_types.clone());
+                        }
+
+                        new_param_types.as_mut().unwrap()[idx] = (new, *i);
+                    }
+                }
+
+                let (new_type, _) = unify_equals(type_.clone(), None, ctx, next_inferterm_id, substs)?;
+
+                if new_param_types.is_some() || new_type.is_some() {
+                    update_env(&mut new_env, i, InferTypedConst {
+                        c: InferConst::DataType {
+                            type_: new_type.unwrap_or(type_.clone()),
+                            param_types: new_param_types.unwrap_or(param_types.clone()),
+                            ctors: ctors.clone(),
+                        },
+                        ..c.clone()
+                    });
+                }
+            },
+            InferConst::Ctor{..} => {
+                let (new_type, _) = unify_equals(c.type_.clone(), None, ctx, next_inferterm_id, substs)?;
+
+                if let Some(new_type) = new_type {
+                    update_env(&mut new_env, i, InferTypedConst {
+                        type_: new_type,
+                        ..c.clone()
+                    });
+                }
+            },
+        }
+    }
+
+    Ok(new_env)
+}
+
+fn unify_equals(
+    term: (Rc<Expr>, Loc), lower: Option<(Rc<Expr>, Loc)>,
+    ctx: &InferCtx, next_inferterm_id: &mut InferTermId, substs: &mut Vec<Equal>,
+)
+    -> Result<(Option<(Rc<Expr>, Loc)>, Option<(Rc<Expr>, Loc)>), TypeChkErr>
+{
+    let enable_implicit = lower.is_some();
+
+    let (term, loc) = term;
+
+    match (*term).clone() {
+        Expr::Equal(a, b) => {
+            let (new_term, iparams) =
+                unify_supported_implicity(a.clone(), b, ctx, next_inferterm_id, substs, enable_implicit)?;
+
+            let new_lower =
+                if iparams.is_empty() { None }
+                else { Some(insert_implicit_args(lower.unwrap(), iparams, next_inferterm_id)) };
+
+            return Ok(( Some(new_term.unwrap_or(a)), new_lower ));
+        },
+        Expr::App{s,t,implicity} => {
+            let new_s = unify_equals_typed_wrap(s.clone(), ctx, next_inferterm_id, substs)?;
+            let new_t = unify_equals_typed_wrap(t.clone(), ctx, next_inferterm_id, substs)?;
+
+            if new_s.is_some() || new_t.is_some() {
+                return Ok((
+                    Some((Rc::new(Expr::App{s: new_s.unwrap_or(s), t: new_t.unwrap_or(t), implicity}), loc)),
+                    None,
+                ));
+            }
+        },
+        Expr::Lam(InferAbs{A,t}, i) => {
+            let new_A = unify_equals_typed_wrap(A.clone(), ctx, next_inferterm_id, substs)?;
+            let new_t = unify_equals_typed_wrap(t.clone(), ctx, next_inferterm_id, substs)?;
+
+            if new_A.is_some() || new_t.is_some() {
+                return Ok((
+                    Some((Rc::new(Expr::Lam(InferAbs{A: new_A.unwrap_or(A), t: new_t.unwrap_or(t)}, i)), loc)),
+                    None,
+                ));
+            }
+        },
+        Expr::Pi(InferAbs{A,t}, i) => {
+            let new_A = unify_equals_typed_wrap(A.clone(), ctx, next_inferterm_id, substs)?;
+            let new_t = unify_equals_typed_wrap(t.clone(), ctx, next_inferterm_id, substs)?;
+
+            if new_A.is_some() || new_t.is_some() {
+                return Ok((
+                    Some((Rc::new(Expr::Pi(InferAbs{A: new_A.unwrap_or(A), t: new_t.unwrap_or(t)}, i)), loc)),
+                    None,
+                ));
+            }
+        },
+        Expr::Let{env, t} => {
+            let new_env = unify_equals_env(&env, ctx, next_inferterm_id, substs)?;
+            let new_t = unify_equals_typed_wrap(t.clone(), ctx, next_inferterm_id, substs)?;
+
+            if new_env.is_some() || new_t.is_some() {
+                return Ok((
+                    Some((Rc::new(Expr::Let{env: new_env.unwrap_or(env), t: new_t.unwrap_or(t)}), None)),
+                    None,
+                ));
+            }
+        },
+        Expr::Case{t, cases, datatype} => {
+            let new_t = unify_equals_typed_wrap(t.clone(), ctx, next_inferterm_id, substs)?;
+
+            let mut new_cases = None;
+            for (i, case) in cases.iter().enumerate() {
+                if let Some(new_case) = unify_equals_typed_wrap(case.clone(), ctx, next_inferterm_id, substs)? {
+                    if new_cases.is_none() {
+                        new_cases = Some(cases.clone());
+                    }
+                    new_cases.as_mut().unwrap()[i] = new_case;
+                }
+            }
+
+            if new_t.is_some() || new_cases.is_some() {
+                return Ok((
+                    Some((Rc::new(Expr::Case {
+                        t: new_t.unwrap_or(t),
+                        cases: new_cases.unwrap_or(cases),
+                        datatype
+                    }), None)),
+                    None,
+                ))
+            }
+        },
+        Expr::Subst(..) => unreachable!(),
+        _ => (),
+    }
+
+    Ok((None, None))
+}
+
+fn unify_equals_typed(
+    term: (Rc<Expr>, Loc), type_: (Rc<Expr>, Loc),
+    ctx: &InferCtx, next_inferterm_id: &mut InferTermId, substs: &mut Vec<Equal>
+)
+    -> Result<(Option<(Rc<Expr>, Loc)>, Option<(Rc<Expr>, Loc)>), TypeChkErr>
+{
+    let (new_term, _) = unify_equals(term.clone(), None, ctx, next_inferterm_id, substs)?;
+    let (new_type, new_term2) =
+        unify_equals(type_, Some(new_term.clone().unwrap_or(term)), ctx, next_inferterm_id, substs)?;
+    
+    Ok((new_term2.or(new_term), new_type))
+}
+
+fn unify_equals_typed_wrap(
+    term: InferTypedTerm, ctx: &InferCtx, next_inferterm_id: &mut InferTermId, substs: &mut Vec<Equal>
+)
+    -> Result<Option<InferTypedTerm>, TypeChkErr>
+{
+    let t = term.tower[0].clone();
+    let T = term.tower[1].clone();
+
+    let (new_t, new_T) = unify_equals_typed(t.clone(), T.clone(), ctx, next_inferterm_id, substs)?;
+
+    Ok(
+        if new_t.is_some() || new_T.is_some() {
+            Some( InferTypedTerm{tower: vec![new_t.unwrap_or(t), new_T.unwrap_or(T)]} )
+        }
+        else { None }
+    )
+}
 
 pub(super) fn insert_implicit_args(
     term: (Rc<Expr>, Loc),
