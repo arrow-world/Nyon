@@ -224,7 +224,7 @@ impl fmt::Display for Equal {
         match self {
             Equal::ToId(id_a, id_b) => write!(f, "?{} = ?{}", id_a.get(), id_b.get()),
             Equal::Instantiate(id, t) => write!(f, "?{} := {}", id.get(), t.0),
-            Equal::Defer(e0, e1, _ctx) => write!(f, "{} = {} -| <ctx>", e0.0, e1.0),
+            Equal::Defer(e0, e1) => write!(f, "{} = {}", e0.0, e1.0),
         }
     }
 }

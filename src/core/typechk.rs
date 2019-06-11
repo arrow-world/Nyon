@@ -150,7 +150,7 @@ pub fn typechk(env: HoledEnv) -> Result<Env, TypeChkErr> {
     debug!("initial context:\n{}", ctx);
 
     let mut substs: Vec<Equal> = vec![];
-    let mut defers: Vec<((Rc<Expr>, Loc), (Rc<Expr>, Loc), InferCtx)> = vec![];
+    let mut defers: Vec<((Rc<Expr>, Loc), (Rc<Expr>, Loc))> = vec![];
     let mut substs_map: HashMap<InferTermId, (Rc<Expr>, Loc)> = HashMap::new();
     for count in 0.. {
         debug!("iteration {}.", count);
@@ -187,7 +187,7 @@ pub fn typechk(env: HoledEnv) -> Result<Env, TypeChkErr> {
                         }
                         substs_map.insert(id.get(), instance);
                     },
-                    Equal::Defer(e0, e1, ctx) => defers.push((e0, e1, ctx)),
+                    Equal::Defer(e0, e1) => defers.push((e0, e1)),
                 }
             }
         }
@@ -197,7 +197,7 @@ pub fn typechk(env: HoledEnv) -> Result<Env, TypeChkErr> {
             debug!("\t?{} / {}", k, v.0);
         }
         debug!("deferred unifications:");
-        for (e0,e1,ctx) in &defers {
+        for (e0,e1) in &defers {
             debug!("\t{} = {}", e0.0, e1.0);
         }
         debug!("current context:");
@@ -217,8 +217,8 @@ pub fn typechk(env: HoledEnv) -> Result<Env, TypeChkErr> {
             return Err(TypeChkErr::InferFailure);
         }
 
-        for (e0, e1, ctx) in defers.split_off(0) {
-            unify(e0, e1, &ctx, &mut next_inferterm_id, &mut substs)?;
+        for (e0, e1) in defers.split_off(0) {
+            unify(e0, e1, &mut next_inferterm_id, &mut substs)?;
         }
     }
 
@@ -230,7 +230,7 @@ pub fn typechk(env: HoledEnv) -> Result<Env, TypeChkErr> {
 
 fn subst_infers(
     ctx: &mut InferCtx,
-    defers: &mut Vec<((Rc<Expr>, Loc), (Rc<Expr>, Loc), InferCtx)>,
+    defers: &mut Vec<((Rc<Expr>, Loc), (Rc<Expr>, Loc))>,
     substs_map: &mut HashMap<InferTermId, (Rc<Expr>, Loc)>
 )
     -> SubstResult
@@ -243,10 +243,9 @@ fn subst_infers(
 
     let found_infer = result.found_infer;
 
-    for (e1, e2, ctx) in defers {
+    for (e1, e2) in defers {
         subst_infers_term(e1, substs_map, &mut result);
         subst_infers_term(e2, substs_map, &mut result);
-        subst_infers_ctx(ctx, substs_map, &mut result);
     }
 
     return SubstResult{found_infer, ..result};
@@ -428,7 +427,7 @@ fn typechk_ctx(ctx: &mut InferCtx, substs: &mut Vec<Equal>, next_inferterm_id: &
     for i in 0..ctx.local.len() {
         let T = ctx.local[i].clone();
         let (term, type_) = (T.tower[0].clone(), T.tower[1].clone());
-        unify(type_.clone(), (Rc::new(Expr::Universe), None), ctx, next_inferterm_id, substs)?;
+        unify(type_.clone(), (Rc::new(Expr::Universe), None), next_inferterm_id, substs)?;
         let (new_term, new_type) =
             typechk_term_supported_implicity(ctx, term, type_, substs, next_inferterm_id, true)?;
         if let Some(new_term) = new_term { ctx.local[i].tower[0] = new_term; }
@@ -453,7 +452,7 @@ fn typechk_ctx(ctx: &mut InferCtx, substs: &mut Vec<Equal>, next_inferterm_id: &
 
         let (new_type, iparams) =
             unify_supported_implicity(T.tower[1].clone(), (Rc::new(Expr::Universe), None),
-                ctx, next_inferterm_id, substs, true)?;
+                next_inferterm_id, substs, true)?;
         if let Some(new_type) = new_type { T.tower[1] = new_type; }
         if !iparams.is_empty() {
             T.tower[0] = insert_implicit_args(T.tower[0].clone(), iparams.clone(), next_inferterm_id);
@@ -461,7 +460,7 @@ fn typechk_ctx(ctx: &mut InferCtx, substs: &mut Vec<Equal>, next_inferterm_id: &
         }
 
         let (new_type, iparams) =
-            unify_supported_implicity(t.tower[1].clone(), T.tower[0].clone(), ctx, next_inferterm_id, substs, true)?;
+            unify_supported_implicity(t.tower[1].clone(), T.tower[0].clone(), next_inferterm_id, substs, true)?;
         if let Some(new_type) = new_type {
             T.tower[0] = new_type.clone();
             t.tower[1] = new_type;
@@ -594,7 +593,7 @@ fn typechk_term_supported_implicity_body(
         |   a: (Rc<Expr>, Loc), b: (Rc<Expr>, Loc), for_term: bool,
             term, ctx: &InferCtx, next_inferterm_id: &mut InferTermId, substs: &mut Vec<Equal>  |
     {
-        let (new_higher, iparams) = unify_supported_implicity(a, b, ctx, next_inferterm_id, substs, enable_implicit)?;
+        let (new_higher, iparams) = unify_supported_implicity(a, b, next_inferterm_id, substs, enable_implicit)?;
 
         let new_lower =
             if iparams.is_empty() { None }
@@ -1019,8 +1018,8 @@ fn typechk_typing(ctx: &InferCtx, t: InferTypedTerm, T: InferTypedTerm,
     next_inferterm_id: &mut InferTermId, substs: &mut Vec<Equal>)
     -> Result<(), TypeChkErr>
 {
-    unify(t.tower[1].clone(), T.tower[0].clone(), ctx, next_inferterm_id, substs)?;
-    unify(T.tower[1].clone(), (Rc::new(Expr::Universe), None), ctx, next_inferterm_id, substs)?;
+    unify(t.tower[1].clone(), T.tower[0].clone(), next_inferterm_id, substs)?;
+    unify(T.tower[1].clone(), (Rc::new(Expr::Universe), None), next_inferterm_id, substs)?;
     Ok(())
 }
 
@@ -1128,8 +1127,11 @@ fn unify_equals(
 
     match (*term).clone() {
         Expr::Equal(a, b) => {
+            let a = unify_equals(a.clone(), None, ctx, next_inferterm_id, substs)?.0.unwrap_or(a);
+            let b = unify_equals(b.clone(), None, ctx, next_inferterm_id, substs)?.0.unwrap_or(b);
+
             let (new_term, iparams) =
-                unify_supported_implicity(a.clone(), b, ctx, next_inferterm_id, substs, enable_implicit)?;
+                unify_supported_implicity(a.clone(), b, next_inferterm_id, substs, enable_implicit)?;
 
             let new_lower =
                 if iparams.is_empty() { None }
@@ -1432,7 +1434,7 @@ pub(super) type InferTermId = usize;
 pub(super) enum Equal {
     ToId(Rc<Cell<InferTermId>>, Rc<Cell<InferTermId>>),
     Instantiate(Rc<Cell<InferTermId>>, (Rc<Expr>, Loc)),
-    Defer((Rc<Expr>, Loc), (Rc<Expr>, Loc), InferCtx),
+    Defer((Rc<Expr>, Loc), (Rc<Expr>, Loc)),
 }
 impl Equal {
     pub(super) fn sort(lhs: Rc<Cell<InferTermId>>, rhs: (Rc<Expr>, Loc)) -> Self {

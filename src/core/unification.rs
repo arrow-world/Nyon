@@ -7,13 +7,12 @@ use std::rc::Rc;
 pub(super) fn unify(
     a: (Rc<Expr>, Loc),
     b: (Rc<Expr>, Loc),
-    ctx: &InferCtx,
     next_inferterm_id: &mut InferTermId,
     substs: &mut Vec<Equal>,
 )
     -> Result<(), UnifyErr>
 {
-    let (new, iparams) = unify_supported_implicity(a, b, ctx, next_inferterm_id, substs, false)?;
+    let (new, iparams) = unify_supported_implicity(a, b, next_inferterm_id, substs, false)?;
     assert!(new.is_none());
     assert!(iparams.is_empty());
     Ok(())
@@ -25,7 +24,6 @@ pub(super) fn unify(
  */
 pub(super) fn unify_supported_implicity(
     a: (Rc<Expr>, Loc), b: (Rc<Expr>, Loc),
-    ctx: &InferCtx,
     next_inferterm_id: &mut InferTermId,
     substs: &mut Vec<Equal>,
     enable_implicit: bool,
@@ -42,10 +40,10 @@ pub(super) fn unify_supported_implicity(
     try_subst(&mut a);
     try_subst(&mut b);
     
-    if let Expr::Pi(..) = *b.0 {
+    if let Expr::App{..} = *b.0 {
         ::std::mem::swap(&mut a, &mut b);
     }
-    if let Expr::App{..} = *b.0 {
+    if let Expr::Pi(..) = *b.0 {
         ::std::mem::swap(&mut a, &mut b);
     }
     if let Expr::Infer{..} = *b.0 {
@@ -67,7 +65,7 @@ pub(super) fn unify_supported_implicity(
                 unify_subst((*s_a).clone(), (*s_b).clone(), ctx, substs)?;
                 unify(e_a.clone(), e_b.clone(), ctx, substs)?;
             }, */
-            _ => substs.push( Equal::Defer(a.clone(), b.clone(), ctx.clone()) ),
+            _ => substs.push( Equal::Defer(a.clone(), b.clone()) ),
         },
         Expr::Infer{id: ref id_a} => match *b.0 {
             Expr::Infer{id: ref id_b} if id_a.get() == id_b.get() => (),
@@ -76,16 +74,46 @@ pub(super) fn unify_supported_implicity(
         Expr::Pi(InferAbs{A: ref A_a, t: ref t_a}, ia) =>
             match *b.0 {
                 Expr::Pi(InferAbs{A: ref A_b, t: ref t_b}, ib) if ia == ib => {
-                    unify_typed(A_a.clone(), A_b.clone(), ctx, next_inferterm_id, substs, enable_implicit)?;
-                    unify_typed(t_a.clone(), t_b.clone(), ctx, next_inferterm_id, substs, enable_implicit)?;
+                    unify_typed(A_a.clone(), A_b.clone(), next_inferterm_id, substs, enable_implicit)?;
+                    unify_typed(t_a.clone(), t_b.clone(), next_inferterm_id, substs, enable_implicit)?;
                 },
-                _ =>
-                    if enable_implicit {
-                        unimplemented!();
-                    }
-                    else {
+                _ => {
+                    if !enable_implicit {
                         return Err(UnifyErr::TermStructureMismatched);
-                    },
+                    }
+
+                    debug!("unification with implicity");
+
+                    let ((Ai, ti, i), rest) =
+                        if let Expr::Pi(InferAbs{A: ref A_b, t: ref t_b}, ib) = *b.0 {
+                            if ia >= ib { ((A_a, t_a, ia), &b) }
+                            else { ((A_b, t_b, ib), &a) }
+                        }
+                        else if ia != 0 {
+                            ((A_a, t_a, ia), &b)
+                        }
+                        else {
+                            return Err(UnifyErr::TermStructureMismatched);
+                        };
+                    
+                    let (new_t, mut iparams) =
+                        unify_supported_implicity(ti.tower[0].clone(), rest.clone(),
+                            next_inferterm_id, substs, true)?;
+                    
+                    let new_t = new_t.map( |t|
+                        InferTypedTerm{tower: vec![t, ti.tower[1].clone()]}
+                    ).unwrap_or(ti.clone());
+                    
+                    iparams.insert(0, (Ai.tower[0].clone(), i));
+
+                    debug!("new term: {}", Rc::new( Expr::Pi(InferAbs{A: Ai.clone(), t: new_t.clone()}, i) ));
+                    debug!("iparams: {:#?}", iparams);
+                    
+                    return Ok((
+                        Some((Rc::new( Expr::Pi(InferAbs{A: Ai.clone(), t: new_t}, i) ), None)),
+                        iparams
+                    ));
+                }
             },
         Expr::Const(id_a) => match *b.0 {
             Expr::Const(id_b) if id_a == id_b => (),
@@ -101,9 +129,9 @@ pub(super) fn unify_supported_implicity(
         },
         Expr::App{s: ref s_a, t: ref t_a, implicity: ia} => match *b.0 {
             Expr::App{s: ref s_b, t: ref t_b, implicity: ib} if ia == ib => {
-                unify_typed(s_a.clone(), s_b.clone(), ctx, next_inferterm_id, substs, enable_implicit)
+                unify_typed(s_a.clone(), s_b.clone(), next_inferterm_id, substs, enable_implicit)
                     .map_err( |e| UnifyErr::InApp(Box::new(e)) )?;
-                unify_typed(t_a.clone(), t_b.clone(), ctx, next_inferterm_id, substs, enable_implicit)
+                unify_typed(t_a.clone(), t_b.clone(), next_inferterm_id, substs, enable_implicit)
                     .map_err( |e| UnifyErr::InApp(Box::new(e)) )?;
             },
             _ =>
@@ -112,14 +140,14 @@ pub(super) fn unify_supported_implicity(
                 }
                 else {
                     return unify_supported_implicity(
-                        s_a.tower[0].clone(), b.clone(), ctx, next_inferterm_id, substs, enable_implicit
+                        s_a.tower[0].clone(), b.clone(), next_inferterm_id, substs, enable_implicit
                     );
                 },
         }
         Expr::Lam(InferAbs{A: ref A_a, t: ref t_a}, ia) => match *b.0 {
             Expr::Lam(InferAbs{A: ref A_b, t: ref t_b}, ib) if ia == ib => {
-                unify_typed(A_a.clone(), A_b.clone(), ctx, next_inferterm_id, substs, enable_implicit)?;
-                unify_typed(t_a.clone(), t_b.clone(), ctx, next_inferterm_id, substs, enable_implicit)?;
+                unify_typed(A_a.clone(), A_b.clone(), next_inferterm_id, substs, enable_implicit)?;
+                unify_typed(t_a.clone(), t_b.clone(), next_inferterm_id, substs, enable_implicit)?;
             },
             _ => return Err(UnifyErr::TermStructureMismatched),
         }
@@ -140,7 +168,6 @@ pub(super) fn unify_supported_implicity(
 fn unify_typed(
     mut a: InferTypedTerm,
     mut b: InferTypedTerm,
-    ctx: &InferCtx,
     next_inferterm_id: &mut InferTermId,
     substs: &mut Vec<Equal>,
     enable_implicit: bool,
@@ -151,7 +178,7 @@ fn unify_typed(
 
     let (new_type, iparams_type) =
         unify_supported_implicity(a.tower[1].clone(), b.tower[1].clone(),
-            ctx, next_inferterm_id, substs, enable_implicit)?;
+            next_inferterm_id, substs, enable_implicit)?;
     if !iparams_type.is_empty() {
         a.tower[0] = insert_implicit_args(a.tower[0].clone(), iparams_type.clone(), next_inferterm_id);
         b.tower[0] = insert_implicit_args(b.tower[0].clone(), iparams_type.clone(), next_inferterm_id);
@@ -160,7 +187,7 @@ fn unify_typed(
 
     let (new_term_1, iparams_term) =
         unify_supported_implicity(a.tower[0].clone(), b.tower[0].clone(),
-            ctx, next_inferterm_id, substs, enable_implicit)?;
+            next_inferterm_id, substs, enable_implicit)?;
 
     Ok((new_type, new_term_0.or(new_term_1), iparams_term))
 }
@@ -172,7 +199,7 @@ fn unify_subst(s: Subst, t: Subst,
         (Subst::Shift(m), Subst::Shift(n)) if m == n => (),
         (Subst::Dot(e_a, s_a), Subst::Dot(e_b, s_b)) => {
             unify_subst((*s_a).clone(), (*s_b).clone(), ctx, next_inferterm_id, equals)?;
-            unify(e_a, e_b, ctx, next_inferterm_id, equals)?;
+            unify(e_a, e_b, next_inferterm_id, equals)?;
         },
         _ => return Err(UnifyErr::SubstStructureMismatched),
     }

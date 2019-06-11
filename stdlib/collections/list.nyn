@@ -1,3 +1,12 @@
+data Option a where
+    none : Option a
+    some : a -> Option a
+
+data Bool where
+    true : Bool
+    false : Bool
+
+(*
 data Nat where
     zero : Nat
     succ : Nat -> Nat
@@ -22,8 +31,6 @@ at {a} (n: Nat) (xs: List{a}) : Option{a} :=
             Nat.zero => some y,
             Nat.succ k => at k ys
         List.cons => none
-
-(*
 
 map {a} {b} (f: a->b) (xs: List{a}) : List{b} :=
     case xs of
