@@ -60,7 +60,7 @@ pub(super) fn unify_supported_implicity(
     let b = b;
 
     match *a.0.clone() {
-        Expr::Subst(ref s_a, ref e_a) => match *b.0 {
+        Expr::Subst(..) => match *b.0 {
             /* Expr::Subst(ref s_b, ref e_b) => {
                 unify_subst((*s_a).clone(), (*s_b).clone(), ctx, substs)?;
                 unify(e_a.clone(), e_b.clone(), ctx, substs)?;

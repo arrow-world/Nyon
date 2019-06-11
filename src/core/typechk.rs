@@ -268,7 +268,7 @@ fn subst_infers(
             match c.c {
                 InferConst::Def(ref mut t) =>
                     subst_infers_term(t, substs, result),
-                InferConst::DataType{ref mut param_types, ref mut type_, ref ctors} => {
+                InferConst::DataType{ref mut param_types, ref mut type_, ctors: _} => {
                     for param_type in param_types {
                         subst_infers_term(&mut param_type.0, substs, result);
                     }
@@ -307,7 +307,7 @@ fn subst_infers(
                     subst_infers_env(env, substs, result);
                     subst_infers_typed_term(t, substs, result);
                 },
-                Expr::Case{t: ref mut t, ref mut cases, ..} => {
+                Expr::Case{ref mut t, ref mut cases, ..} => {
                     subst_infers_typed_term(t, substs, result);
                     for case in cases {
                         subst_infers_typed_term(case, substs, result);
@@ -390,7 +390,7 @@ fn cast_no_infer(ctx: InferCtx) -> Env {
                 env: cast_no_infer_env(env.clone()),
                 t: cast_no_infer_typed_term(t.clone()),
             },
-            Expr::Case{ref t, ref cases, ref datatype} => Term::Case {
+            Expr::Case{ref t, ref cases, datatype: _} => Term::Case {
                 t: cast_no_infer_typed_term(t.clone()),
                 cases: cases.iter().map(|t| cast_no_infer_typed_term(t.clone())).collect(),
             },
@@ -570,22 +570,6 @@ fn typechk_term_supported_implicity(
     substs: &mut Vec<Equal>,
     next_inferterm_id: &mut InferTermId,
     enable_implicit: bool,
-)
-    -> Result<(Option<(Rc<Expr>, Loc)>, Option<(Rc<Expr>, Loc)>), TypeChkErr>
-{
-    typechk_term_supported_implicity_body(
-        ctx, term, type_, substs, next_inferterm_id, enable_implicit, false
-    )
-}
-
-fn typechk_term_supported_implicity_body(
-    ctx: &InferCtx,
-    term: (Rc<Expr>, Loc),
-    type_: (Rc<Expr>, Loc),
-    substs: &mut Vec<Equal>,
-    next_inferterm_id: &mut InferTermId,
-    enable_implicit: bool,
-    _ignore_type: bool,
 )
     -> Result<(Option<(Rc<Expr>, Loc)>, Option<(Rc<Expr>, Loc)>), TypeChkErr>
 {
