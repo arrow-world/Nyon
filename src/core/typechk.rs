@@ -1117,7 +1117,7 @@ fn unify_equals_env(env: &InferEnv, ctx: &InferCtx, next_inferterm_id: &mut Infe
 
 fn unify_equals(
     term: (Rc<Expr>, Loc), lower: Option<(Rc<Expr>, Loc)>,
-    ctx: &InferCtx, next_inferterm_id: &mut InferTermId, substs: &mut Vec<Equal>,
+    next_inferterm_id: &mut InferTermId, substs: &mut Vec<Equal>,
 )
     -> Result<(Option<(Rc<Expr>, Loc)>, Option<(Rc<Expr>, Loc)>), TypeChkErr>
 {
@@ -1127,8 +1127,8 @@ fn unify_equals(
 
     match (*term).clone() {
         Expr::Equal(a, b) => {
-            let a = unify_equals(a.clone(), None, ctx, next_inferterm_id, substs)?.0.unwrap_or(a);
-            let b = unify_equals(b.clone(), None, ctx, next_inferterm_id, substs)?.0.unwrap_or(b);
+            let a = unify_equals(a.clone(), None, next_inferterm_id, substs)?.0.unwrap_or(a);
+            let b = unify_equals(b.clone(), None, next_inferterm_id, substs)?.0.unwrap_or(b);
 
             let (new_term, iparams) =
                 unify_supported_implicity(a.clone(), b, next_inferterm_id, substs, enable_implicit)?;
@@ -1140,8 +1140,8 @@ fn unify_equals(
             return Ok(( Some(new_term.unwrap_or(a)), new_lower ));
         },
         Expr::App{s,t,implicity} => {
-            let new_s = unify_equals_typed_wrap(s.clone(), ctx, next_inferterm_id, substs)?;
-            let new_t = unify_equals_typed_wrap(t.clone(), ctx, next_inferterm_id, substs)?;
+            let new_s = unify_equals_typed_wrap(s.clone(), next_inferterm_id, substs)?;
+            let new_t = unify_equals_typed_wrap(t.clone(), next_inferterm_id, substs)?;
 
             if new_s.is_some() || new_t.is_some() {
                 return Ok((
@@ -1151,8 +1151,8 @@ fn unify_equals(
             }
         },
         Expr::Lam(InferAbs{A,t}, i) => {
-            let new_A = unify_equals_typed_wrap(A.clone(), ctx, next_inferterm_id, substs)?;
-            let new_t = unify_equals_typed_wrap(t.clone(), ctx, next_inferterm_id, substs)?;
+            let new_A = unify_equals_typed_wrap(A.clone(), next_inferterm_id, substs)?;
+            let new_t = unify_equals_typed_wrap(t.clone(), next_inferterm_id, substs)?;
 
             if new_A.is_some() || new_t.is_some() {
                 return Ok((
@@ -1162,8 +1162,8 @@ fn unify_equals(
             }
         },
         Expr::Pi(InferAbs{A,t}, i) => {
-            let new_A = unify_equals_typed_wrap(A.clone(), ctx, next_inferterm_id, substs)?;
-            let new_t = unify_equals_typed_wrap(t.clone(), ctx, next_inferterm_id, substs)?;
+            let new_A = unify_equals_typed_wrap(A.clone(), next_inferterm_id, substs)?;
+            let new_t = unify_equals_typed_wrap(t.clone(), next_inferterm_id, substs)?;
 
             if new_A.is_some() || new_t.is_some() {
                 return Ok((
@@ -1173,8 +1173,8 @@ fn unify_equals(
             }
         },
         Expr::Let{env, t} => {
-            let new_env = unify_equals_env(&env, ctx, next_inferterm_id, substs)?;
-            let new_t = unify_equals_typed_wrap(t.clone(), ctx, next_inferterm_id, substs)?;
+            let new_env = unify_equals_env(&env, next_inferterm_id, substs)?;
+            let new_t = unify_equals_typed_wrap(t.clone(), next_inferterm_id, substs)?;
 
             if new_env.is_some() || new_t.is_some() {
                 return Ok((
@@ -1184,11 +1184,11 @@ fn unify_equals(
             }
         },
         Expr::Case{t, cases, datatype} => {
-            let new_t = unify_equals_typed_wrap(t.clone(), ctx, next_inferterm_id, substs)?;
+            let new_t = unify_equals_typed_wrap(t.clone(), next_inferterm_id, substs)?;
 
             let mut new_cases = None;
             for (i, case) in cases.iter().enumerate() {
-                if let Some(new_case) = unify_equals_typed_wrap(case.clone(), ctx, next_inferterm_id, substs)? {
+                if let Some(new_case) = unify_equals_typed_wrap(case.clone(), next_inferterm_id, substs)? {
                     if new_cases.is_none() {
                         new_cases = Some(cases.clone());
                     }
@@ -1216,26 +1216,26 @@ fn unify_equals(
 
 fn unify_equals_typed(
     term: (Rc<Expr>, Loc), type_: (Rc<Expr>, Loc),
-    ctx: &InferCtx, next_inferterm_id: &mut InferTermId, substs: &mut Vec<Equal>
+    next_inferterm_id: &mut InferTermId, substs: &mut Vec<Equal>
 )
     -> Result<(Option<(Rc<Expr>, Loc)>, Option<(Rc<Expr>, Loc)>), TypeChkErr>
 {
-    let (new_term, _) = unify_equals(term.clone(), None, ctx, next_inferterm_id, substs)?;
+    let (new_term, _) = unify_equals(term.clone(), None, next_inferterm_id, substs)?;
     let (new_type, new_term2) =
-        unify_equals(type_, Some(new_term.clone().unwrap_or(term)), ctx, next_inferterm_id, substs)?;
+        unify_equals(type_, Some(new_term.clone().unwrap_or(term)), next_inferterm_id, substs)?;
     
     Ok((new_term2.or(new_term), new_type))
 }
 
 fn unify_equals_typed_wrap(
-    term: InferTypedTerm, ctx: &InferCtx, next_inferterm_id: &mut InferTermId, substs: &mut Vec<Equal>
+    term: InferTypedTerm, next_inferterm_id: &mut InferTermId, substs: &mut Vec<Equal>
 )
     -> Result<Option<InferTypedTerm>, TypeChkErr>
 {
     let t = term.tower[0].clone();
     let T = term.tower[1].clone();
 
-    let (new_t, new_T) = unify_equals_typed(t.clone(), T.clone(), ctx, next_inferterm_id, substs)?;
+    let (new_t, new_T) = unify_equals_typed(t.clone(), T.clone(), next_inferterm_id, substs)?;
 
     Ok(
         if new_t.is_some() || new_T.is_some() {
