@@ -563,6 +563,34 @@ fn typechk_term(ctx: &InferCtx, term: &InferTypedTerm, substs: &mut Vec<Equal>, 
     Ok(())
 }
 
+fn typechk_term_defer_unify(
+    ctx: &InferCtx,
+    term: (Rc<Expr>, Loc),
+    type_: (Rc<Expr>, Loc),
+)
+    -> (Option<(Rc<Expr>, Loc)> , Option<(Rc<Expr>, Loc)>)
+{
+    let equal = |a,b,loc| (Rc::new(Expr::Equal(a,b)), loc);
+
+    let (_, loc_term) = term;
+    let (_, loc_type) = type_;
+
+    let univ = (Rc::new(Expr::Universe), None);
+
+    match *term.0 {
+        Expr::Const(cid) => (None, Some(equal(type_.clone(), ctx.consts[cid].type_.clone(), loc_type))),
+        Expr::DBI(i) => (None, Some(equal(type_.clone(), ctx.local(i).tower[0].clone(), loc_type))),
+        Expr::Universe => (None, Some(equal(type_.clone(), univ, loc_type))),
+        Expr::App{ref s, ref t, implicity} => 
+    }
+}
+
+fn typechk_typedterm_defer_unify(ctx: &InferCtx, tt: &InferTypedTerm)
+    -> (Option<(Rc<Expr>, Loc)> , Option<(Rc<Expr>, Loc)>)
+{
+    typechk_term_defer_unify(ctx, tt.tower[0].clone(), tt.tower[1].clone())
+}
+
 fn typechk_term_supported_implicity(
     ctx: &InferCtx,
     term: (Rc<Expr>, Loc),
