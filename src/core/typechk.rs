@@ -581,7 +581,38 @@ fn typechk_term_defer_unify(
         Expr::Const(cid) => (None, Some(equal(type_.clone(), ctx.consts[cid].type_.clone(), loc_type))),
         Expr::DBI(i) => (None, Some(equal(type_.clone(), ctx.local(i).tower[0].clone(), loc_type))),
         Expr::Universe => (None, Some(equal(type_.clone(), univ, loc_type))),
-        Expr::App{ref s, ref t, implicity} => 
+        Expr::App{ref s, ref t, implicity} => {
+            let new_tt_from_s = |tt, next_inferterm_id: &mut InferTermId| {
+                new_tt(tt, next_inferterm_id, s,
+                    |new_t_term, new_t_type|
+                        Expr::App {
+                            s: InferTypedTerm{tower: vec![ new_t_term, new_t_type ]},
+                            t: t.clone(),
+                            implicity,
+                        },
+                    &term,
+                )
+            };
+            let new_tt_from_t = |tt, next_inferterm_id: &mut InferTermId| {
+                new_tt(tt, next_inferterm_id, t,
+                    |new_u_term, new_u_type|
+                        Expr::App {
+                            s: s.clone(),
+                            t: InferTypedTerm{tower: vec![ new_u_term, new_u_type ]},
+                            implicity,
+                        },
+                    &term,
+                )
+            };
+
+            let new_s = new_tt_from_s(
+                typechk_typedterm_defer_unify(ctx, s, next_inferterm_id)
+            );
+
+            let new_t = new_tt_from_t(
+                typechk_typedterm_defer_unify(ctx, t, next_inferterm_id)
+            );
+        },
     }
 }
 
