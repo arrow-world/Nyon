@@ -30,6 +30,8 @@ pub(super) fn unify_supported_implicity(
 )
     -> Result<(Option<(Rc<Expr>, Loc)>, Vec<((Rc<Expr>, Loc), u8)>), UnifyErr>
 {
+    // todo: 新たな項を返す時は, 位置情報はaとb両方のものをマージして返す
+
     debug!("Unification in progress... ({} & {})", a.0, b.0);
     debug!("enable_implicit = {}", enable_implicit);
     // debug!("{}", ctx);

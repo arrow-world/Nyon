@@ -552,74 +552,287 @@ fn typechk_const (
     }
 }
 
-fn typechk_term(ctx: &InferCtx, term: &InferTypedTerm, substs: &mut Vec<Equal>, next_inferterm_id: &mut InferTermId)
-    -> Result<(), TypeChkErr>
-{
-    let term_ = term.tower[0].clone();
-    let type_ = term.tower[1].clone();
-    let (new_term, new_type) = typechk_term_supported_implicity(ctx, term_, type_, substs, next_inferterm_id, false)?;
-    assert!(new_term.is_none());
-    assert!(new_type.is_none());
-    Ok(())
-}
+type ExprL = (Rc<Expr>, Loc);
 
-fn typechk_term_defer_unify(
-    ctx: &InferCtx,
-    term: (Rc<Expr>, Loc),
-    type_: (Rc<Expr>, Loc),
-)
-    -> (Option<(Rc<Expr>, Loc)> , Option<(Rc<Expr>, Loc)>)
-{
-    let equal = |a,b,loc| (Rc::new(Expr::Equal(a,b)), loc);
+fn typechk_superposition_ctx(ctx: &InferCtx, next_ii: &mut InferTermId) -> InferCtx {
+    InferCtx {
+        consts:
+            ctx.consts.iter()
+                .map(|c| typechk_superposition_const(&ctx, c, next_ii).unwrap_or(c.clone())).collect(),
+        local:
+            ctx.local.iter()
+                .map(|tt| typechk_superposition_typedterm(&ctx, tt, next_ii).unwrap_or(tt.clone())).collect(),
+        typings:
+            ctx.typings.iter().map(|(term, type_)| {
+                let new_term = typechk_superposition_typedterm(&ctx, term, next_ii).unwrap_or(term.clone());
+                let new_type = typechk_superposition_typedterm(&ctx, type_, next_ii).unwrap_or(type_.clone());
 
-    let (_, loc_term) = term;
-    let (_, loc_type) = type_;
+                let t = new_term.tower[0].clone(); // ソースコード上で型付けられた項
+                let a = new_term.tower[1].clone(); // その項の型
+                let b = new_type.tower[0].clone(); // ソースコード上で型付けている型
+                let u = new_type.tower[1].clone(); // その型の型
 
-    let univ = (Rc::new(Expr::Universe), None);
-
-    match *term.0 {
-        Expr::Const(cid) => (None, Some(equal(type_.clone(), ctx.consts[cid].type_.clone(), loc_type))),
-        Expr::DBI(i) => (None, Some(equal(type_.clone(), ctx.local(i).tower[0].clone(), loc_type))),
-        Expr::Universe => (None, Some(equal(type_.clone(), univ, loc_type))),
-        Expr::App{ref s, ref t, implicity} => {
-            let new_tt_from_s = |tt, next_inferterm_id: &mut InferTermId| {
-                new_tt(tt, next_inferterm_id, s,
-                    |new_t_term, new_t_type|
-                        Expr::App {
-                            s: InferTypedTerm{tower: vec![ new_t_term, new_t_type ]},
-                            t: t.clone(),
-                            implicity,
-                        },
-                    &term,
+                (
+                    InferTypedTerm{tower: vec![t, superposition(a.clone(), b.clone())]},
+                    InferTypedTerm{tower: vec![superposition(b, a), u]},
                 )
-            };
-            let new_tt_from_t = |tt, next_inferterm_id: &mut InferTermId| {
-                new_tt(tt, next_inferterm_id, t,
-                    |new_u_term, new_u_type|
-                        Expr::App {
-                            s: s.clone(),
-                            t: InferTypedTerm{tower: vec![ new_u_term, new_u_type ]},
-                            implicity,
-                        },
-                    &term,
-                )
-            };
-
-            let new_s = new_tt_from_s(
-                typechk_typedterm_defer_unify(ctx, s, next_inferterm_id)
-            );
-
-            let new_t = new_tt_from_t(
-                typechk_typedterm_defer_unify(ctx, t, next_inferterm_id)
-            );
-        },
+            }).collect(),
     }
 }
 
-fn typechk_typedterm_defer_unify(ctx: &InferCtx, tt: &InferTypedTerm)
-    -> (Option<(Rc<Expr>, Loc)> , Option<(Rc<Expr>, Loc)>)
+fn typechk_superposition_const(ctx: &InferCtx, c: &InferTypedConst, next_ii: &mut InferTermId)
+    -> Option<InferTypedConst>
 {
-    typechk_term_defer_unify(ctx, tt.tower[0].clone(), tt.tower[1].clone())
+    // 変数の種類ごとに場合分け
+    match c.c {
+        InferConst::Def(ref t) => {
+            let (new_term, new_type) = typechk_superposition(ctx, t.clone(), c.type_.clone(), next_ii);
+
+            // 変更があればSomeを返して変更を伝播
+            if new_term.is_some() || new_type.is_some() {
+                Some( InferTypedConst {
+                    c: InferConst::Def(new_term.unwrap_or(t.clone())),
+                    type_: new_type.unwrap_or(c.type_.clone()),
+                    ..c.clone()
+                } )
+            }
+            else { None }
+        },
+        InferConst::DataType{ref param_types, ref type_, ref ctors} => {
+            // 1階型宇宙
+            let univ1 = (Rc::new(Expr::Universe), None);
+
+            // 新しいGADTパラメタ型リスト
+            let mut new_param_types = param_types.clone();
+
+            // GADTのパラメタ型を型検査
+            for (idx, (param_type, i)) in param_types.iter().enumerate() {
+                // GADTのパラメタ型`param_type`は1階の型である
+                let (new_type1, new_type2) = typechk_superposition(ctx, param_type.clone(), univ1.clone(), next_ii);
+
+                // GADTのパラメタ型の型は変更不可
+                // `new_type2`は`Some(<Type1=Type1>)`でなければならない
+                if let Expr::Equal(ref a, ref b) = *new_type2.unwrap().0 {
+                    if let Expr::Universe = *a.0 {}
+                    else { assert!(false); }
+
+                    if let Expr::Universe = *b.0 {}
+                    else { assert!(false); }
+                }
+                else { assert!(false); }
+
+                if let Some(new_type1) = new_type1 {
+                    new_param_types[idx] = (new_type1, *i);
+                }
+            }
+
+            let new_param_types = new_param_types;
+
+            let univk = (Rc::new(Expr::Universe), None);
+
+            // GADT型の(パラメタを除く)型は常に型宇宙でなければならない
+            // 常に`type_`が型宇宙との重ね合わせへ置き換わる
+            Some( InferTypedConst {
+                c: InferConst::DataType {
+                    param_types: new_param_types,
+                    type_: superposition(type_.clone(), univk),
+                    ctors: ctors.clone(),
+                },
+                ..c.clone()
+            } )
+
+            // GADTの変数型`c.type_`は型検査開始時に適切に初期化されるため, ここで検査する必要はない
+        },
+        InferConst::Ctor{datatype: _} => {
+            // 1階型宇宙
+            let univ1 = (Rc::new(Expr::Universe), None);
+
+            // コンストラクタの型`c.type_`は1階の型である
+            let (new_type1, new_type2) = typechk_superposition(ctx, c.type_.clone(), univ1, next_ii);
+
+            // コンストラクタの型の型は変更不可
+            // `new_type2`は`Some(<Type1=Type1>)`でなければならない
+            if let Expr::Equal(ref a, ref b) = *new_type2.unwrap().0 {
+                if let Expr::Universe = *a.0 {}
+                else { assert!(false); }
+
+                if let Expr::Universe = *b.0 {}
+                else { assert!(false); }
+            }
+            else { assert!(false); }
+
+            // コンストラクタの型が変更されればSomeで返して変更を伝播
+            new_type1.map( |new_type1| InferTypedConst{type_: new_type1, ..c.clone()} )
+        }
+    }
+}
+
+// 重ね合わせ項を生成する関数
+fn superposition(origin: ExprL, inferred: ExprL) -> ExprL {
+    let loc_origin = origin.1.clone();
+    (Rc::new(Expr::Equal(origin, inferred)), loc_origin)
+}
+
+/*  項`term`の種類によって推論された項と実際の項`type_`の重ね合わせを含んだ項木を生成する関数
+ *  `term` : チェックされる項
+ *  `type_` : termの型
+ *  戻り値 : 重ね合わせを含む新たな項と型のtuple, それぞれ変更がなければNone
+ */
+fn typechk_superposition(ctx: &InferCtx, term: (Rc<Expr>, Loc), type_: (Rc<Expr>, Loc), next_ii: &mut InferTermId)
+    -> (Option<ExprL>, Option<ExprL>)
+{
+    let equal_type = |a| superposition(type_, a);
+
+    let (_, loc_term) = term;
+
+    // 型宇宙の項を作っておく
+    let univ = (Rc::new(Expr::Universe), None);
+
+    // 項の種類ごとに場合分け
+    match *term.0 {
+        Expr::Const(cid) => (None, Some( equal_type( ctx.consts[cid].type_.clone() ) )),
+        Expr::DBI(i) => (None, Some( equal_type( ctx.local(i).tower[0].clone() ) )),
+        Expr::Universe => (None, Some( equal_type(univ) )),
+        Expr::App{ref s, ref t, implicity} => {
+            // 部分項についても再帰的に重ね合わせ型推論
+            let new_s = typechk_superposition_typedterm(ctx, s, next_ii).unwrap_or(s.clone());
+            let new_t = typechk_superposition_typedterm(ctx, t, next_ii).unwrap_or(t.clone());
+
+            // 適用する関数`s`の戻り値の型. この時点では不明なため新たな推論型とする.
+            let typeof_s_ret = (Rc::new(new_inferterm(next_ii)), None);
+
+            // 適用する関数`s`の型
+            let inferred_typeof_s = (Rc::new( Expr::Pi(InferAbs{
+                A: InferTypedTerm{tower: vec![ new_t.tower[1].clone(), univ.clone() ]},
+                t: InferTypedTerm{tower: vec![ typeof_s_ret.clone(), univ ]},
+            }, implicity) ), None);
+
+            // 適用する関数`s`の型について重ね合わせられた新たな項
+            let new_term = (Rc::new( Expr::App {
+                s: InferTypedTerm{ tower: vec![
+                    new_s.tower[0].clone(),
+                    superposition(new_s.tower[1].clone(), inferred_typeof_s)
+                ] },
+                t: new_t,
+                implicity,
+            } ), loc_term);
+
+            // この関数適用項の型. 適用する関数`s`は依存関数でありうるため、戻り値の型は引数`t`に依存する.
+            // `s`の戻り値の型`typeof_s_ret`への引数`t`の明示的代入(explicit substitution)として項全体の型を表現する.
+            let inferred_type = (Rc::new( Expr::Subst(
+                Subst::from_expr(t.tower[0].clone()),
+                typeof_s_ret,
+            ) ), None);
+
+            (Some(new_term), Some(equal_type(inferred_type)))
+        },
+        Expr::Lam(InferAbs{ref A, ref t}, implicity) => {
+            // 戻り値`t`の型検査をするために, 関数抽象の引数型`A`の変数がローカル変数に追加された局所文脈を作る
+            let mut local_ctx = ctx.clone();
+            local_ctx.local.push( subst_typed_lazily(Subst::Shift(1), A.clone()) );
+            let local_ctx = local_ctx;
+
+            // 部分項についても再帰的に重ね合わせ型推論
+            // `t`については局所文脈で型検査する
+            let new_A = typechk_superposition_typedterm(ctx, A, next_ii).unwrap_or(A.clone());
+            let new_t = typechk_superposition_typedterm(&local_ctx, t, next_ii).unwrap_or(t.clone());
+
+            // 引数の型
+            let arg_type = new_A.tower[0].clone();
+
+            // 戻り値の型
+            let ret_type = new_t.tower[1].clone();
+
+            let inferred_type = (Rc::new( Expr::Pi( InferAbs {
+                A: InferTypedTerm{tower: vec![arg_type, univ.clone()]},
+                t: InferTypedTerm{tower: vec![ret_type, univ]},
+            }, implicity ) ), None);
+
+            (None, Some(equal_type(inferred_type)))
+        },
+        Expr::Pi(InferAbs{ref A, ref t}, implicity) => {
+            // 戻り値`t`の型検査をするために, 関数抽象の引数型`A`の変数がローカル変数に追加された局所文脈を作る
+            let mut local_ctx = ctx.clone();
+            local_ctx.local.push( subst_typed_lazily(Subst::Shift(1), A.clone()) );
+            let local_ctx = local_ctx;
+
+            // 部分項についても再帰的に重ね合わせ型推論
+            // `t`については局所文脈で型検査する
+            let new_A = typechk_superposition_typedterm(ctx, A, next_ii).unwrap_or(A.clone());
+            let new_t = typechk_superposition_typedterm(&local_ctx, t, next_ii).unwrap_or(t.clone());
+
+            // `A`と`t`それぞれの型を型宇宙と重ね合わせる
+            let new_term = (Rc::new( Expr::Pi( InferAbs {
+                A: InferTypedTerm{tower: vec![ new_A.tower[0].clone(),
+                    superposition(new_A.tower[1].clone(), univ.clone()) ]},
+                t: InferTypedTerm{tower: vec![ new_t.tower[0].clone(),
+                    superposition(new_t.tower[0].clone(), univ.clone()) ]},
+            }, implicity ) ), loc_term);
+
+            (Some(new_term), Some(equal_type(univ)))
+        },
+        Expr::Let{ref env, ref t} => {
+            // 局所変数 : let ... in ... 構文において、内部で使用可能な新たな変数のこと. 一般に複数.
+
+            // 新しい局所変数リスト
+            let mut new_env = env.clone();
+
+            // すべての局所変数について型検査
+            for (idx, c) in env.iter().enumerate() {
+                // ※: 型検査における文脈はletの内側ではなく外側の文脈である.
+                // TODO:    let ... in ... で複数変数を定義する際, 変数の相互参照を可能にするべきだろうか?
+                //          let ... in let ... in ... と並べることで循環のない相互参照は実質的に可能だが.
+                if let Some(new_c) = typechk_superposition_const(ctx/*※*/, c, next_ii) {
+                    new_env[idx] = new_c;
+                }
+            }
+
+            let new_env = new_env;
+
+            // 局所文脈`local_ctx`は現在の文脈`ctx`に局所変数`new_env`を追加したもの
+            let mut local_ctx = ctx.clone();
+            local_ctx.consts.extend(new_env.iter().cloned());
+            let local_ctx = local_ctx;
+
+            // let値`t`を局所文脈で型検査する
+            let new_t = typechk_superposition_typedterm(&local_ctx, t, next_ii).unwrap_or(t.clone());
+
+            // 全体の型`type_`はlet値`t`の型に等しい
+            let inferred_type = new_t.tower[1].clone();
+
+            let new_term = (Rc::new( Expr::Let {
+                env: new_env,
+                t: new_t,
+            } ), loc_term);
+
+            (Some(new_term), Some(equal_type(inferred_type)))
+        },
+        Expr::Case{ref t, ref cases, ref datatype} => unimplemented!(),
+        Expr::Value(ref v) => (None, Some( equal_type( match *v {
+            Value::Nat(..) => unimplemented!(),
+            Value::Int(..) => unimplemented!(),
+            Value::Str(..) => unimplemented!(),
+        } ) )),
+        Expr::Infer{..} => (None, None),
+        Expr::Subst(..) => unreachable!(),
+        Expr::Equal(..) => unreachable!(),
+    }
+}
+
+// 重ね合わせ型推論関数を型付き項`InferTypedTerm`用にラップした関数
+fn typechk_superposition_typedterm(ctx: &InferCtx, tt: &InferTypedTerm, next_ii: &mut InferTermId)
+    -> Option<InferTypedTerm>
+{
+    let term = tt.tower[0].clone();
+    let type_ = tt.tower[1].clone();
+
+    let (new_term, new_type) = typechk_superposition(ctx, term.clone(), type_.clone(), next_ii);
+
+    // 項か型どちらかが変更されていたら, 型付き項全体が変更されたものとしてSomeで返す
+    if new_term.is_some() || new_type.is_some() {
+        Some( InferTypedTerm{ tower: vec![new_term.unwrap_or(term), new_type.unwrap_or(type_)] } )
+    }
+    else { None }
 }
 
 fn typechk_term_supported_implicity(
