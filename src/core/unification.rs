@@ -67,7 +67,8 @@ pub(super) fn unify_supported_implicity(
                 unify_subst((*s_a).clone(), (*s_b).clone(), ctx, substs)?;
                 unify(e_a.clone(), e_b.clone(), ctx, substs)?;
             }, */
-            _ => substs.push( Equal::Defer(a.clone(), b.clone()) ),
+            // _ => substs.push( Equal::Defer(a.clone(), b.clone()) ),
+            _ => return Ok((Some((Rc::new(Expr::Equal(a.clone(), b.clone())), None)), vec![])),
         },
         Expr::Infer{id: ref id_a} => match *b.0 {
             Expr::Infer{id: ref id_b} if id_a.get() == id_b.get() => (),
@@ -161,7 +162,7 @@ pub(super) fn unify_supported_implicity(
                 else { return Err(UnifyErr::ValueMismatched(v_a.clone(), v_b.clone())) },
             _ => return Err(UnifyErr::TermStructureMismatched),
         },
-        Expr::Equal(..) => unreachable!(),
+        Expr::Equal(..) => (),
     };
 
     Ok((None, vec![]))

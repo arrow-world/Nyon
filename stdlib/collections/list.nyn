@@ -1,12 +1,13 @@
-data Option a where
+data Option (a:Type) where
     none : Option a
     some : a -> Option a
+
+(*
 
 data Bool where
     true : Bool
     false : Bool
 
-(*
 data Nat where
     zero : Nat
     succ : Nat -> Nat
