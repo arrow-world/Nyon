@@ -161,7 +161,7 @@ pub fn typechk(env: HoledEnv) -> Result<Env, TypeChkErr> {
         debug!("type superposition ctx: {}", ctx);
 
         debug!("starting unification");
-        ctx = unify_equals_ctx(&ctx, &mut next_inferterm_id, &mut substs)?;
+        ctx = unify_equals_ctx(ctx, &mut next_inferterm_id, &mut substs)?;
         debug!("finished unification in this iteration.");
 
         debug!("unificated ctx: {}", ctx);
@@ -714,39 +714,29 @@ fn typechk_superposition_typedterm(ctx: &InferCtx, tt: &InferTypedTerm, next_ii:
     else { None }
 }
 
-fn unify_equals_ctx(ctx: &InferCtx, next_ii: &mut InferTermId, substs: &mut Vec<Equal>)
+fn unify_equals_ctx(ctx: InferCtx, next_ii: &mut InferTermId, substs: &mut Vec<Equal>)
     -> Result<InferCtx, TypeChkErr>
 {
     let new_ctx = InferCtx {
         consts:
-            unify_equals_env(&ctx.consts, next_ii, substs)?.unwrap_or(ctx.consts.clone()),
+            unify_equals_env(ctx.consts, next_ii, substs)?,
         local:
-            ctx.local.iter()
-                .map( |t| Ok(unify_equals_typed_wrap(t.clone(), next_ii, substs)?.unwrap_or(t.clone())) )
+            ctx.local.into_iter()
+                .map( |t| Ok(unify_equals_typed_wrap(t.clone(), next_ii, substs)?.unwrap_or(t)) )
                 .collect::<Result<_,TypeChkErr>>()?,
         typings:
-            ctx.typings.iter().map( |(term, type_)| Ok((
-                unify_equals_typed_wrap(term.clone(), next_ii, substs)?.unwrap_or(term.clone()),
-                unify_equals_typed_wrap(type_.clone(), next_ii, substs)?.unwrap_or(type_.clone()),
+            ctx.typings.into_iter().map( |(term, type_)| Ok((
+                unify_equals_typed_wrap(term.clone(), next_ii, substs)?.unwrap_or(term),
+                unify_equals_typed_wrap(type_.clone(), next_ii, substs)?.unwrap_or(type_),
             )) ).collect::<Result<_,TypeChkErr>>()?,
     };
 
     Ok(new_ctx)
 }
 
-fn unify_equals_env(env: &InferEnv, next_inferterm_id: &mut InferTermId, substs: &mut Vec<Equal>)
-    -> Result<Option<InferEnv>, TypeChkErr>
+fn unify_equals_env(mut env: InferEnv, next_inferterm_id: &mut InferTermId, substs: &mut Vec<Equal>)
+    -> Result<InferEnv, TypeChkErr>
 {
-    let mut new_env = None;
-
-    let update_env = |new_env: &mut Option<InferEnv>, i, new_c| {
-        if new_env.is_none() {
-            *new_env = Some(env.clone());
-        }
-
-        new_env.as_mut().unwrap()[i] = new_c;
-    };
-
     for (i, c) in env.iter().enumerate() {
         match c.c {
             InferConst::Def(ref t) => {
@@ -754,11 +744,11 @@ fn unify_equals_env(env: &InferEnv, next_inferterm_id: &mut InferTermId, substs:
                     unify_equals_typed(t.clone(), c.type_.clone(), next_inferterm_id, substs)?;
                 
                 if new_term.is_some() || new_type.is_some() {
-                    update_env(&mut new_env, i, InferTypedConst {
+                    env[i] = InferTypedConst {
                         c: InferConst::Def(new_term.unwrap_or(t.clone())),
                         type_: new_type.unwrap_or(c.type_.clone()),
                         ..c.clone()
-                    });
+                    };
                 }
             },
             InferConst::DataType{ref param_types, ref type_, ref ctors} => {
@@ -781,7 +771,7 @@ fn unify_equals_env(env: &InferEnv, next_inferterm_id: &mut InferTermId, substs:
                 let (new_c_type, _) = unify_equals(c.type_.clone(), None, next_inferterm_id, substs)?;
 
                 if new_param_types.is_some() || new_type.is_some() || new_c_type.is_some() {
-                    update_env(&mut new_env, i, InferTypedConst {
+                    env[i] = InferTypedConst {
                         c: InferConst::DataType {
                             type_: new_type.unwrap_or(type_.clone()),
                             param_types: new_param_types.unwrap_or(param_types.clone()),
@@ -789,30 +779,30 @@ fn unify_equals_env(env: &InferEnv, next_inferterm_id: &mut InferTermId, substs:
                         },
                         type_: new_c_type.unwrap_or(c.type_.clone()),
                         ..c.clone()
-                    });
+                    };
                 }
             },
             InferConst::Ctor{..} => {
                 let (new_type, _) = unify_equals(c.type_.clone(), None, next_inferterm_id, substs)?;
 
                 if let Some(new_type) = new_type {
-                    update_env(&mut new_env, i, InferTypedConst {
+                    env[i] = InferTypedConst {
                         type_: new_type,
                         ..c.clone()
-                    });
+                    };
                 }
             },
         }
     }
 
-    Ok(new_env)
+    Ok(env)
 }
 
 fn unify_equals(
     term: (Rc<Expr>, Loc), lower: Option<(Rc<Expr>, Loc)>,
     next_inferterm_id: &mut InferTermId, substs: &mut Vec<Equal>,
 )
-    -> Result<(Option<(Rc<Expr>, Loc)>, Option<(Rc<Expr>, Loc)>), TypeChkErr>
+    -> Result<((Rc<Expr>, Loc), Option<(Rc<Expr>, Loc)>), TypeChkErr>
 {
     let enable_implicit = lower.is_some();
 
@@ -820,17 +810,17 @@ fn unify_equals(
 
     match (*term).clone() {
         Expr::Equal(a, b) => {
-            let a = unify_equals(a.clone(), None, next_inferterm_id, substs)?.0.unwrap_or(a);
-            let b = unify_equals(b.clone(), None, next_inferterm_id, substs)?.0.unwrap_or(b);
+            let a = unify_equals(a, None, next_inferterm_id, substs)?.0;
+            let b = unify_equals(b, None, next_inferterm_id, substs)?.0;
 
             let (new_term, iparams) =
                 unify_supported_implicity(a.clone(), b, next_inferterm_id, substs, enable_implicit)?;
 
             let new_lower =
-                if iparams.is_empty() { None }
+                if iparams.is_empty() { lower }
                 else { Some(insert_implicit_args(lower.unwrap(), iparams, next_inferterm_id)) };
 
-            return Ok(( Some(new_term.unwrap_or(a)), new_lower ));
+            return Ok(( new_term.unwrap_or(a.clone()), new_lower ));
         },
         Expr::App{s,t,implicity} => {
             let new_s = unify_equals_typed_wrap(s.clone(), next_inferterm_id, substs)?;
@@ -838,8 +828,8 @@ fn unify_equals(
 
             if new_s.is_some() || new_t.is_some() {
                 return Ok((
-                    Some((Rc::new(Expr::App{s: new_s.unwrap_or(s), t: new_t.unwrap_or(t), implicity}), loc)),
-                    None,
+                    (Rc::new(Expr::App{s: new_s.unwrap_or(s), t: new_t.unwrap_or(t), implicity}), loc),
+                    lower,
                 ));
             }
         },
@@ -849,8 +839,8 @@ fn unify_equals(
 
             if new_A.is_some() || new_t.is_some() {
                 return Ok((
-                    Some((Rc::new(Expr::Lam(InferAbs{A: new_A.unwrap_or(A), t: new_t.unwrap_or(t)}, i)), loc)),
-                    None,
+                    (Rc::new(Expr::Lam(InferAbs{A: new_A.unwrap_or(A), t: new_t.unwrap_or(t)}, i)), loc),
+                    lower,
                 ));
             }
         },
@@ -860,18 +850,18 @@ fn unify_equals(
 
             if new_A.is_some() || new_t.is_some() {
                 return Ok((
-                    Some((Rc::new(Expr::Pi(InferAbs{A: new_A.unwrap_or(A), t: new_t.unwrap_or(t)}, i)), loc)),
-                    None,
+                    (Rc::new(Expr::Pi(InferAbs{A: new_A.unwrap_or(A), t: new_t.unwrap_or(t)}, i)), loc),
+                    lower,
                 ));
             }
         },
         Expr::Let{env, t} => {
-            let new_env = unify_equals_env(&env, next_inferterm_id, substs)?;
+            let new_env = unify_equals_env(env, next_inferterm_id, substs)?;
             let new_t = unify_equals_typed_wrap(t.clone(), next_inferterm_id, substs)?;
 
-            if new_env.is_some() || new_t.is_some() {
+            if new_t.is_some() {
                 return Ok((
-                    Some((Rc::new(Expr::Let{env: new_env.unwrap_or(env), t: new_t.unwrap_or(t)}), None)),
+                    (Rc::new(Expr::Let{env: new_env, t: new_t.unwrap_or(t)}), None),
                     None,
                 ));
             }
