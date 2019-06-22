@@ -147,90 +147,55 @@ pub fn typechk(env: HoledEnv) -> Result<Env, TypeChkErr> {
         ).collect(),
     };
 
-    debug!("initial context:\n{}", ctx);
-
     let mut substs: Vec<Equal> = vec![];
-    let mut defers: Vec<((Rc<Expr>, Loc), (Rc<Expr>, Loc))> = vec![];
     let mut substs_map: HashMap<InferTermId, (Rc<Expr>, Loc)> = HashMap::new();
-    for count in 0.. {
-        debug!("iteration {}.", count);
+    'typechk : for typechk_it in 0.. {
+        debug!("type-check iteration {}.", typechk_it);
         debug!("current context: {}", ctx);
 
         ctx = typechk_superposition_ctx(&ctx, &mut next_inferterm_id);
 
         debug!("type superposition ctx: {}", ctx);
 
-        debug!("starting unification");
-        ctx = unify_equals_ctx(&ctx, &mut next_inferterm_id, &mut substs)?;
-        debug!("finished unification in this iteration.");
+        // let mut subst_results = vec![];
+        for unify_it in 0.. {
+            debug!("unification iteration {}.{}.", typechk_it, unify_it);
 
-        debug!("unificated ctx: {}", ctx);
+            debug!("starting unification");
+            ctx = unify_equals_ctx(ctx, &mut next_inferterm_id, &mut substs)?;
+            debug!("finished unification.");
+            debug!("unificated ctx: {}", ctx);
 
-        debug!("collected substitutions:");
-        for subst in &substs {
-            debug!("\t{}", subst);
-        }
+            debug!("collected substitutions:");
+            for subst in &substs {
+                debug!("\t{}", subst);
+            }
 
-        // 推論項への代入時の衝突によりunificationが発生し代入が増えることがあるため, 完全に代入がなくなるまでループ
-        while !substs.is_empty() {
-            for subst in substs.split_off(0) {
-                match subst {
-                    Equal::ToId(mut lhs, mut rhs) => {
-                        if rhs > lhs { ::std::mem::swap(&mut lhs, &mut rhs); }
-                        if rhs == lhs { continue; }
-                        assert!(lhs > rhs);
+            convert_substs_map(&mut substs_map, &mut substs)?;
 
-                        if let Some(mut instance) = substs_map.remove(&lhs.get()) {
-                            if let Some(other) = substs_map.get(&rhs.get()).cloned() {
-                                // unify(instance.clone(), other.clone(), &ctx, &mut next_inferterm_id, &mut substs)?;
-                                instance = (Rc::new(Expr::Equal(instance, other)), None)
-                            }
-                            substs_map.insert(rhs.get(), instance);
-                        }
-                        lhs.set(rhs.get());
-                    },
-                    Equal::Instantiate(id, mut instance) => {
-                        if let Some(other) = substs_map.get(&id.get()).cloned() {
-                            // unify(instance, other, &ctx, &mut next_inferterm_id, &mut substs)?;
-                            instance = (Rc::new(Expr::Equal(instance, other)), None);
-                        }
-                        substs_map.insert(id.get(), instance);
-                    },
-                    Equal::Defer(e0, e1) => defers.push((e0, e1)),
-                }
+            debug!("substitutions:");
+            for (k,v) in &substs_map {
+                debug!("\t?{} / {}", k, v.0);
+            }
+
+            let subst_result = subst_infers(&mut ctx, &mut substs_map);
+            // subst_results.push(subst_result.clone());
+
+            debug!("substitution result:");
+            debug!("found_infer?: {}", subst_result.found_infer);
+            debug!("has_substed?: {}", subst_result.has_substed);
+
+            debug!("current ctx: {}\n", ctx);
+
+            if !subst_result.found_infer {
+                break 'typechk;
+            }
+            if !subst_result.has_substed {
+                break;
             }
         }
-
-        debug!("substitutions:");
-        for (k,v) in &substs_map {
-            debug!("\t?{} / {}", k, v.0);
-        }
-        debug!("deferred unifications:");
-        for (e0,e1) in &defers {
-            debug!("\t{} = {}", e0.0, e1.0);
-        }
-        debug!("current context:");
-        debug!("{}\n", ctx);
-
-        let subst_result = subst_infers(&mut ctx, &mut defers, &mut substs_map);
-
-        debug!("substitution result:");
-        debug!("found_infer?: {}", subst_result.found_infer);
-        debug!("has_substed?: {}", subst_result.has_substed);
-        debug!("current ctx: {}\n", ctx);
-
-        if !subst_result.found_infer {
-            break;
-        }
-        else if !subst_result.has_substed {
-            return Err(TypeChkErr::InferFailure);
-        }
-
-        assert!(defers.is_empty());
-
-        for (e0, e1) in defers.split_off(0) {
-            unify(e0, e1, &mut next_inferterm_id, &mut substs)?;
-        }
+        
+        // todo: 条件が足りず無限ループしたときを検知して推論を失敗させる
     }
 
     debug!("finished type checking.");
@@ -239,9 +204,40 @@ pub fn typechk(env: HoledEnv) -> Result<Env, TypeChkErr> {
     Ok( cast_no_infer(ctx) )
 }
 
+fn convert_substs_map(substs_map: &mut HashMap<InferTermId, ExprL>, substs: &mut Vec<Equal>)
+    -> Result<(), TypeChkErr>
+{
+    // 推論項への代入時の衝突によりunificationが発生し代入が増えることがあるため, 完全に代入がなくなるまでループ
+    while !substs.is_empty() {
+        for subst in substs.split_off(0) {
+            match subst {
+                Equal::ToId(mut lhs, mut rhs) => {
+                    if rhs > lhs { ::std::mem::swap(&mut lhs, &mut rhs); }
+                    if rhs == lhs { continue; }
+                    assert!(lhs > rhs);
+
+                    if let Some(mut instance) = substs_map.remove(&lhs.get()) {
+                        if let Some(other) = substs_map.get(&rhs.get()).cloned() {
+                            instance = (Rc::new(Expr::Equal(instance, other)), None)
+                        }
+                        substs_map.insert(rhs.get(), instance);
+                    }
+                    lhs.set(rhs.get());
+                },
+                Equal::Instantiate(id, mut instance) => {
+                    if let Some(other) = substs_map.get(&id.get()).cloned() {
+                        instance = (Rc::new(Expr::Equal(instance, other)), None);
+                    }
+                    substs_map.insert(id.get(), instance);
+                },
+            }
+        }
+    }
+    Ok(())
+}
+
 fn subst_infers(
     ctx: &mut InferCtx,
-    defers: &mut Vec<((Rc<Expr>, Loc), (Rc<Expr>, Loc))>,
     substs_map: &mut HashMap<InferTermId, (Rc<Expr>, Loc)>
 )
     -> SubstResult
@@ -253,11 +249,6 @@ fn subst_infers(
     subst_infers_ctx(ctx, substs_map, &mut result);
 
     let found_infer = result.found_infer;
-
-    for (e1, e2) in defers {
-        subst_infers_term(e1, substs_map, &mut result);
-        subst_infers_term(e2, substs_map, &mut result);
-    }
 
     return SubstResult{found_infer, ..result};
 
@@ -354,6 +345,8 @@ fn subst_infers(
     
     type Substs = HashMap<InferTermId, (Rc<Expr>, Loc)>;
 }
+
+#[derive(Clone, Debug)]
 pub struct SubstResult {
     has_substed: bool,
     found_infer: bool,
@@ -714,191 +707,154 @@ fn typechk_superposition_typedterm(ctx: &InferCtx, tt: &InferTypedTerm, next_ii:
     else { None }
 }
 
-fn unify_equals_ctx(ctx: &InferCtx, next_ii: &mut InferTermId, substs: &mut Vec<Equal>)
+fn unify_equals_ctx(ctx: InferCtx, next_ii: &mut InferTermId, substs: &mut Vec<Equal>)
     -> Result<InferCtx, TypeChkErr>
 {
     let new_ctx = InferCtx {
         consts:
-            unify_equals_env(&ctx.consts, next_ii, substs)?.unwrap_or(ctx.consts.clone()),
+            unify_equals_env(ctx.consts, next_ii, substs)?,
         local:
-            ctx.local.iter()
-                .map( |t| Ok(unify_equals_typed_wrap(t.clone(), next_ii, substs)?.unwrap_or(t.clone())) )
+            ctx.local.into_iter()
+                .map( |t| unify_equals_typed_wrap(t, next_ii, substs) )
                 .collect::<Result<_,TypeChkErr>>()?,
         typings:
-            ctx.typings.iter().map( |(term, type_)| Ok((
-                unify_equals_typed_wrap(term.clone(), next_ii, substs)?.unwrap_or(term.clone()),
-                unify_equals_typed_wrap(type_.clone(), next_ii, substs)?.unwrap_or(type_.clone()),
+            ctx.typings.into_iter().map( |(term, type_)| Ok((
+                unify_equals_typed_wrap(term, next_ii, substs)?,
+                unify_equals_typed_wrap(type_, next_ii, substs)?,
             )) ).collect::<Result<_,TypeChkErr>>()?,
     };
 
     Ok(new_ctx)
 }
 
-fn unify_equals_env(env: &InferEnv, next_inferterm_id: &mut InferTermId, substs: &mut Vec<Equal>)
-    -> Result<Option<InferEnv>, TypeChkErr>
+fn unify_equals_env(env: InferEnv, next_inferterm_id: &mut InferTermId, substs: &mut Vec<Equal>)
+    -> Result<InferEnv, TypeChkErr>
 {
-    let mut new_env = None;
-
-    let update_env = |new_env: &mut Option<InferEnv>, i, new_c| {
-        if new_env.is_none() {
-            *new_env = Some(env.clone());
-        }
-
-        new_env.as_mut().unwrap()[i] = new_c;
-    };
-
-    for (i, c) in env.iter().enumerate() {
+    env.into_iter().map( |c| Ok({
         match c.c {
             InferConst::Def(ref t) => {
                 let (new_term, new_type) =
                     unify_equals_typed(t.clone(), c.type_.clone(), next_inferterm_id, substs)?;
                 
-                if new_term.is_some() || new_type.is_some() {
-                    update_env(&mut new_env, i, InferTypedConst {
-                        c: InferConst::Def(new_term.unwrap_or(t.clone())),
-                        type_: new_type.unwrap_or(c.type_.clone()),
-                        ..c.clone()
-                    });
+                InferTypedConst {
+                    c: InferConst::Def(new_term),
+                    type_: new_type,
+                    ..c.clone()
                 }
             },
             InferConst::DataType{ref param_types, ref type_, ref ctors} => {
-                let mut new_param_types = None;
-
-                for (idx, (param_type, i)) in param_types.iter().enumerate() {
-                    let (new, _) = unify_equals(param_type.clone(), None, next_inferterm_id, substs)?;
-
-                    if let Some(new) = new {
-                        if new_param_types.is_none() {
-                            new_param_types = Some(param_types.clone());
-                        }
-
-                        new_param_types.as_mut().unwrap()[idx] = (new, *i);
-                    }
-                }
+                let new_param_types = param_types.iter()
+                    .map( |(param_type, i)|
+                        Ok(( unify_equals(param_type.clone(), None, next_inferterm_id, substs)?.0, *i ))
+                    )
+                    .collect::<Result<Vec<_>,TypeChkErr>>()?;
 
                 let (new_type, _) = unify_equals(type_.clone(), None, next_inferterm_id, substs)?;
 
                 let (new_c_type, _) = unify_equals(c.type_.clone(), None, next_inferterm_id, substs)?;
 
-                if new_param_types.is_some() || new_type.is_some() || new_c_type.is_some() {
-                    update_env(&mut new_env, i, InferTypedConst {
-                        c: InferConst::DataType {
-                            type_: new_type.unwrap_or(type_.clone()),
-                            param_types: new_param_types.unwrap_or(param_types.clone()),
-                            ctors: ctors.clone(),
-                        },
-                        type_: new_c_type.unwrap_or(c.type_.clone()),
-                        ..c.clone()
-                    });
+                InferTypedConst {
+                    c: InferConst::DataType {
+                        type_: new_type,
+                        param_types: new_param_types,
+                        ctors: ctors.clone(),
+                    },
+                    type_: new_c_type,
+                    ..c.clone()
                 }
             },
             InferConst::Ctor{..} => {
                 let (new_type, _) = unify_equals(c.type_.clone(), None, next_inferterm_id, substs)?;
 
-                if let Some(new_type) = new_type {
-                    update_env(&mut new_env, i, InferTypedConst {
-                        type_: new_type,
-                        ..c.clone()
-                    });
+                InferTypedConst {
+                    type_: new_type,
+                    ..c.clone()
                 }
             },
         }
-    }
-
-    Ok(new_env)
+    }) ).collect()
 }
 
 fn unify_equals(
-    term: (Rc<Expr>, Loc), lower: Option<(Rc<Expr>, Loc)>,
+    mut term: (Rc<Expr>, Loc), mut lower: Option<(Rc<Expr>, Loc)>,
     next_inferterm_id: &mut InferTermId, substs: &mut Vec<Equal>,
 )
-    -> Result<(Option<(Rc<Expr>, Loc)>, Option<(Rc<Expr>, Loc)>), TypeChkErr>
+    -> Result<((Rc<Expr>, Loc), Option<(Rc<Expr>, Loc)>), TypeChkErr>
 {
     let enable_implicit = lower.is_some();
 
-    let (term, loc) = term;
+    let loc = term.1.clone();
 
-    match (*term).clone() {
+    try_subst(&mut term);
+    if let Some(ref mut lower) = lower {
+        try_subst(lower);
+    }
+
+    match (*term.0).clone() {
         Expr::Equal(a, b) => {
-            let a = unify_equals(a.clone(), None, next_inferterm_id, substs)?.0.unwrap_or(a);
-            let b = unify_equals(b.clone(), None, next_inferterm_id, substs)?.0.unwrap_or(b);
+            let a = unify_equals(a, None, next_inferterm_id, substs)?.0;
+            let b = unify_equals(b, None, next_inferterm_id, substs)?.0;
 
             let (new_term, iparams) =
                 unify_supported_implicity(a.clone(), b, next_inferterm_id, substs, enable_implicit)?;
 
             let new_lower =
-                if iparams.is_empty() { None }
+                if iparams.is_empty() { lower }
                 else { Some(insert_implicit_args(lower.unwrap(), iparams, next_inferterm_id)) };
 
-            return Ok(( Some(new_term.unwrap_or(a)), new_lower ));
+            Ok(( new_term.unwrap_or(a), new_lower ))
         },
         Expr::App{s,t,implicity} => {
             let new_s = unify_equals_typed_wrap(s.clone(), next_inferterm_id, substs)?;
             let new_t = unify_equals_typed_wrap(t.clone(), next_inferterm_id, substs)?;
 
-            if new_s.is_some() || new_t.is_some() {
-                return Ok((
-                    Some((Rc::new(Expr::App{s: new_s.unwrap_or(s), t: new_t.unwrap_or(t), implicity}), loc)),
-                    None,
-                ));
-            }
+            Ok((
+                (Rc::new(Expr::App{s: new_s, t: new_t, implicity}), loc),
+                lower,
+            ))
         },
         Expr::Lam(InferAbs{A,t}, i) => {
             let new_A = unify_equals_typed_wrap(A.clone(), next_inferterm_id, substs)?;
             let new_t = unify_equals_typed_wrap(t.clone(), next_inferterm_id, substs)?;
 
-            if new_A.is_some() || new_t.is_some() {
-                return Ok((
-                    Some((Rc::new(Expr::Lam(InferAbs{A: new_A.unwrap_or(A), t: new_t.unwrap_or(t)}, i)), loc)),
-                    None,
-                ));
-            }
+            Ok((
+                (Rc::new(Expr::Lam(InferAbs{A: new_A, t: new_t}, i)), loc),
+                lower,
+            ))
         },
         Expr::Pi(InferAbs{A,t}, i) => {
             let new_A = unify_equals_typed_wrap(A.clone(), next_inferterm_id, substs)?;
             let new_t = unify_equals_typed_wrap(t.clone(), next_inferterm_id, substs)?;
 
-            if new_A.is_some() || new_t.is_some() {
-                return Ok((
-                    Some((Rc::new(Expr::Pi(InferAbs{A: new_A.unwrap_or(A), t: new_t.unwrap_or(t)}, i)), loc)),
-                    None,
-                ));
-            }
+            Ok((
+                (Rc::new(Expr::Pi(InferAbs{A: new_A, t: new_t}, i)), loc),
+                lower,
+            ))
         },
         Expr::Let{env, t} => {
-            let new_env = unify_equals_env(&env, next_inferterm_id, substs)?;
+            let new_env = unify_equals_env(env, next_inferterm_id, substs)?;
             let new_t = unify_equals_typed_wrap(t.clone(), next_inferterm_id, substs)?;
 
-            if new_env.is_some() || new_t.is_some() {
-                return Ok((
-                    Some((Rc::new(Expr::Let{env: new_env.unwrap_or(env), t: new_t.unwrap_or(t)}), None)),
-                    None,
-                ));
-            }
+            Ok((
+                (Rc::new(Expr::Let{env: new_env, t: new_t}), None),
+                lower,
+            ))
         },
         Expr::Case{t, cases, datatype} => {
             let new_t = unify_equals_typed_wrap(t.clone(), next_inferterm_id, substs)?;
 
-            let mut new_cases = None;
-            for (i, case) in cases.iter().enumerate() {
-                if let Some(new_case) = unify_equals_typed_wrap(case.clone(), next_inferterm_id, substs)? {
-                    if new_cases.is_none() {
-                        new_cases = Some(cases.clone());
-                    }
-                    new_cases.as_mut().unwrap()[i] = new_case;
-                }
-            }
+            let new_cases = cases.into_iter()
+                .map(|case| unify_equals_typed_wrap(case.clone(), next_inferterm_id, substs))
+                .collect::<Result<_,TypeChkErr>>()?;
 
-            if new_t.is_some() || new_cases.is_some() {
-                return Ok((
-                    Some((Rc::new(Expr::Case {
-                        t: new_t.unwrap_or(t),
-                        cases: new_cases.unwrap_or(cases),
-                        datatype
-                    }), None)),
-                    None,
-                ))
-            }
+            Ok((
+                (Rc::new(Expr::Case {
+                    t: new_t,
+                    cases: new_cases,
+                    datatype
+                }), None),
+                lower,
+            ))
         },
         Expr::Subst(s,e) => {
             let new_s = unify_equals_subst(s.clone(), next_inferterm_id, substs)?;
@@ -906,32 +862,25 @@ fn unify_equals(
 
             assert!(new_e.1.is_none());
 
-            if new_s.is_some() || new_e.0.is_some() {
-                return Ok((
-                    Some((Rc::new(Expr::Subst(new_s.unwrap_or(s), new_e.0.unwrap_or(e))), None)),
-                    None,
-                ));
-            }
+            Ok((
+                (Rc::new(Expr::Subst(new_s, new_e.0)), None),
+                lower,
+            ))
         },
-        _ => (),
+        _ => Ok((term, lower)),
     }
-
-    Ok((None, None))
 }
 
 fn unify_equals_subst(s: Subst, next_ii: &mut InferTermId, substs: &mut Vec<Equal>)
-    -> Result<Option<Subst>, TypeChkErr>
+    -> Result<Subst, TypeChkErr>
 {
     let new_s = match s {
-        Subst::Shift(_) => None,
-        Subst::Dot(e,s) => Some(
+        Subst::Shift(_) => s,
+        Subst::Dot(e,s) => 
             Subst::Dot(
-                unify_equals(e.clone(), None, next_ii, substs)?.0.unwrap_or(e),
-                unify_equals_subst((*s).clone(), next_ii, substs)?
-                    .map(|s| Rc::new(s))
-                    .unwrap_or(s),
-            )
-        ),
+                unify_equals(e.clone(), None, next_ii, substs)?.0,
+                Rc::new(unify_equals_subst((*s).clone(), next_ii, substs)?),
+            ),
     };
 
     Ok(new_s)
@@ -941,31 +890,26 @@ fn unify_equals_typed(
     term: (Rc<Expr>, Loc), type_: (Rc<Expr>, Loc),
     next_inferterm_id: &mut InferTermId, substs: &mut Vec<Equal>
 )
-    -> Result<(Option<(Rc<Expr>, Loc)>, Option<(Rc<Expr>, Loc)>), TypeChkErr>
+    -> Result<((Rc<Expr>, Loc), (Rc<Expr>, Loc)), TypeChkErr>
 {
     let (new_term, _) = unify_equals(term.clone(), None, next_inferterm_id, substs)?;
     let (new_type, new_term2) =
-        unify_equals(type_, Some(new_term.clone().unwrap_or(term)), next_inferterm_id, substs)?;
+        unify_equals(type_, Some(new_term.clone()), next_inferterm_id, substs)?;
     
-    Ok((new_term2.or(new_term), new_type))
+    Ok((new_term2.unwrap(), new_type))
 }
 
 fn unify_equals_typed_wrap(
     term: InferTypedTerm, next_inferterm_id: &mut InferTermId, substs: &mut Vec<Equal>
 )
-    -> Result<Option<InferTypedTerm>, TypeChkErr>
+    -> Result<InferTypedTerm, TypeChkErr>
 {
     let t = term.tower[0].clone();
     let T = term.tower[1].clone();
 
     let (new_t, new_T) = unify_equals_typed(t.clone(), T.clone(), next_inferterm_id, substs)?;
 
-    Ok(
-        if new_t.is_some() || new_T.is_some() {
-            Some( InferTypedTerm{tower: vec![new_t.unwrap_or(t), new_T.unwrap_or(T)]} )
-        }
-        else { None }
-    )
+    Ok( InferTypedTerm{ tower: vec![new_t, new_T] } )
 }
 
 pub(super) fn insert_implicit_args(
@@ -1157,7 +1101,6 @@ pub(super) type InferTermId = usize;
 pub(super) enum Equal {
     ToId(Rc<Cell<InferTermId>>, Rc<Cell<InferTermId>>),
     Instantiate(Rc<Cell<InferTermId>>, (Rc<Expr>, Loc)),
-    Defer((Rc<Expr>, Loc), (Rc<Expr>, Loc)),
 }
 impl Equal {
     pub(super) fn sort(lhs: Rc<Cell<InferTermId>>, rhs: (Rc<Expr>, Loc)) -> Self {

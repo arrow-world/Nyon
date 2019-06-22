@@ -73,5 +73,6 @@ fn main(){
 
     // println!("{}", diyusi::core::typechk::HoledEnv::from(env));
 
-    println!("{:#?}\n", core::typechk::typechk(env.into()));
+    core::typechk::typechk(env.into());
+    // println!("{:#?}\n", );
 }

@@ -1,41 +1,35 @@
-data Option (a:Type) where
+data Option (a:Type) {
     none : Option a
     some : a -> Option a
+}
 
-(*
-
-data Bool where
-    true : Bool
-    false : Bool
-
-data Nat where
+data Nat {
     zero : Nat
     succ : Nat -> Nat
+}
 
-data List {a:Type} where
-    nil : List{a}
-    cons : a -> List{a} -> List{a}
+data List (a:Type) {
+    nil : List a
+    cons : a -> List a -> List a
+}
 
-lnil := List.nil
-lcons := List.cons
+lnil = List.nil
+lcons = List.cons
 
-data Option {a:Type} where
-    some : a -> Option{a}
-    none : Option{a}
+some = Option.some
+none = Option.none
 
-some := Option.some
-none := Option.none
-
-at {a} (n: Nat) (xs: List{a}) : Option{a} :=
-    case xs of
-        List.nil y ys => case n of
-            Nat.zero => some y,
+at {a} (n: Nat) (xs: List a) : Option a =
+    match xs {
+        List.nil y ys => match n {
+            Nat.zero => some y
             Nat.succ k => at k ys
+        }
         List.cons => none
+    }
 
-map {a} {b} (f: a->b) (xs: List{a}) : List{b} :=
-    case xs of
+map {a} {b} (f: a->b) (xs: List a) : List b =
+    matxh xs {
         List.nil => lnil,
         List.cons y ys => lcons (f y) (map f ys)
-
-*)
+    }
