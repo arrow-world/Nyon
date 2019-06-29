@@ -1,1 +1,0 @@
-type Record[Ts: finite.PartialMap[meta.Identifier, Type]] :<= 

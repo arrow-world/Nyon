@@ -1,2 +1,0 @@
-datatype DepSum [T, A: T->Type]
-    intro : |x:T| A x -> DepSum
