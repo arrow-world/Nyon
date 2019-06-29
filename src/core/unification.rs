@@ -5,6 +5,8 @@ use syntax::Loc;
 use std::rc::Rc;
 use itertools::Itertools;
 
+// 3個以上の重ね合わせを、全組み合わせでunificationする
+// 暗黙引数推論により項の更新が発生したとき、もし項が衝突していたらエラーにする
 pub(super) fn unify_combination(
     xs: &Vec<ExprL>,
     next_ii: &mut InferTermId,
