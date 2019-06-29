@@ -542,7 +542,10 @@ fn typechk_superposition_const(ctx: &InferCtx, c: &InferTypedConst, next_ii: &mu
                     else { assert!(false); }
 
                     if let Expr::Universe = *b.0 {}
-                    else { assert!(false); }
+                    else {
+                        debug!("{}", b.0);
+                        assert!(false);
+                    }
                 }
                 else { assert!(false); }
             }
@@ -597,6 +600,8 @@ fn superposition(origin: ExprL, inferred: ExprL) -> ExprL {
 fn typechk_superposition(ctx: &InferCtx, term: (Rc<Expr>, Loc), type_: (Rc<Expr>, Loc), next_ii: &mut InferTermId)
     -> (Option<ExprL>, Option<ExprL>)
 {
+    debug!("typechecking {} : {}", term.0, type_.0);
+
     let equal_type = |a| superposition(type_, a);
 
     let (_, loc_term) = term;

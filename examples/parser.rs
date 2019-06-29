@@ -11,7 +11,7 @@ fn main(){
     env_logger::init();
 
     let mut source = String::new();
-    File::open("stdlib/collections/list.nyn").unwrap().read_to_string(&mut source).unwrap();
+    File::open("test.nyn").unwrap().read_to_string(&mut source).unwrap();
     let source = source;
 
     let lexed = match syntax::lex_src(&source) {

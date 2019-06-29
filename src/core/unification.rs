@@ -6,7 +6,7 @@ use std::rc::Rc;
 use itertools::Itertools;
 
 // 3個以上の重ね合わせを、全組み合わせでunificationする
-// 暗黙引数推論により項の更新が発生したとき、もし項が衝突していたらエラーにする
+// 暗黙引数が複数のunificationにおいて追加されたらエラーにする
 pub(super) fn unify_combination(
     xs: &Vec<ExprL>,
     next_ii: &mut InferTermId,
@@ -15,7 +15,7 @@ pub(super) fn unify_combination(
 )
     -> Result<(Option<(Rc<Expr>, Loc)>, Vec<((Rc<Expr>, Loc), u8)>), UnifyErr>
 {
-    let mut new_term : Option<ExprL> = None;
+    let mut new_terms = vec![];
     let mut iparams = vec![];
 
     for (a,b) in xs.iter().tuple_combinations() {
@@ -23,13 +23,8 @@ pub(super) fn unify_combination(
             unify_supported_implicity(a.clone(), b.clone(), next_ii, substs, enable_implicit)?;
         
         if let Some(new_term_) = new_term_ {
-            if let Some(ref new_term) = new_term {
-                if new_term.0 != new_term_.0 {
-                    return Err(UnifyErr::ConflictedTerms(new_term.clone(), new_term_));
-                }
-            }
-            else {
-                new_term = Some(new_term_);
+            if ! new_terms.contains(&new_term_) {
+                new_terms.push(new_term_);
             }
         }
         
@@ -42,6 +37,15 @@ pub(super) fn unify_combination(
             }
         }
     }
+
+    let new_term =
+        if new_terms.is_empty() { None }
+        else {
+            Some(
+                if let Some(new_term) = new_terms.first().cloned() { new_term }
+                else { superposition_many(new_terms, None) }
+            )
+        };
 
     Ok((new_term, iparams))
 }
