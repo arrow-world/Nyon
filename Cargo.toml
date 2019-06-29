@@ -13,3 +13,4 @@ log = "0.4.6"
 serde = { version = "1.0.88" , features = ["rc"] }
 serde_derive = "1.0.88"
 rmp-serde = "0.13.7"
+itertools = "0.8.0"

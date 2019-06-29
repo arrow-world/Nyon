@@ -146,6 +146,7 @@ pub fn typechk(env: HoledEnv) -> Result<Env, TypeChkErr> {
             (assign_term(t, &mut next_inferterm_id), assign_term(T, &mut next_inferterm_id))
         ).collect(),
     };
+    let mut before_ctx = ctx.clone();
 
     let mut substs: Vec<Equal> = vec![];
     let mut substs_map: HashMap<InferTermId, (Rc<Expr>, Loc)> = HashMap::new();
@@ -195,7 +196,12 @@ pub fn typechk(env: HoledEnv) -> Result<Env, TypeChkErr> {
             }
         }
         
-        // todo: 条件が足りず無限ループしたときを検知して推論を失敗させる
+        // 条件が足りず無限ループしたときを検知して推論を失敗させる
+        if ctx == before_ctx {
+            return Err(TypeChkErr::InferFailure);
+        }
+
+        before_ctx = ctx.clone();
     }
 
     debug!("finished type checking.");
@@ -218,7 +224,7 @@ fn convert_substs_map(substs_map: &mut HashMap<InferTermId, ExprL>, substs: &mut
 
                     if let Some(mut instance) = substs_map.remove(&lhs.get()) {
                         if let Some(other) = substs_map.get(&rhs.get()).cloned() {
-                            instance = (Rc::new(Expr::Equal(instance, other)), None)
+                            instance = superposition_loc(instance, other, None);
                         }
                         substs_map.insert(rhs.get(), instance);
                     }
@@ -226,7 +232,7 @@ fn convert_substs_map(substs_map: &mut HashMap<InferTermId, ExprL>, substs: &mut
                 },
                 Equal::Instantiate(id, mut instance) => {
                     if let Some(other) = substs_map.get(&id.get()).cloned() {
-                        instance = (Rc::new(Expr::Equal(instance, other)), None);
+                        instance = superposition_loc(instance, other, None);
                     }
                     substs_map.insert(id.get(), instance);
                 },
@@ -319,10 +325,10 @@ fn subst_infers(
                     subst_infers_subst(s, substs, result);
                     subst_infers_term(e, substs, result);
                 },
-                Expr::Equal(ref mut a, ref mut b) => {
-                    subst_infers_term(a, substs, result);
-                    subst_infers_term(b, substs, result);
-                },
+                Expr::Equal(ref mut xs) =>
+                    for x in xs {
+                        subst_infers_term(x, substs, result);
+                    },
                 _ => (),
             }
         }
@@ -420,7 +426,7 @@ fn cast_no_infer(ctx: InferCtx) -> Env {
     }
 }
 
-type ExprL = (Rc<Expr>, Loc);
+pub type ExprL = (Rc<Expr>, Loc);
 
 fn typechk_superposition_ctx(ctx: &InferCtx, next_ii: &mut InferTermId) -> InferCtx {
     InferCtx {
@@ -481,7 +487,11 @@ fn typechk_superposition_const(ctx: &InferCtx, c: &InferTypedConst, next_ii: &mu
                 // GADTのパラメタ型の型は変更不可
                 // `new_type2`は変更があったとしても`Some(<Type1=Type1>)`でなければならない
                 if let Some(new_type2) = new_type2 {
-                    if let Expr::Equal(ref a, ref b) = *new_type2.0 {
+                    if let Expr::Equal(ref xs) = *new_type2.0 {
+                        assert!(xs.len() == 2);
+                        let a = xs[0].clone();
+                        let b = xs[1].clone();
+
                         if let Expr::Universe = *a.0 {}
                         else { assert!(false); }
 
@@ -523,7 +533,11 @@ fn typechk_superposition_const(ctx: &InferCtx, c: &InferTypedConst, next_ii: &mu
             // コンストラクタの型の型は変更不可
             // `new_type2`は変更があったとしても`<Type1=Type1>`でなければならない
             if let Some(new_type2) = new_type2 {
-                if let Expr::Equal(ref a, ref b) = *new_type2.0 {
+                if let Expr::Equal(ref xs) = *new_type2.0 {
+                    assert!(xs.len() == 2);
+                    let a = xs[0].clone();
+                    let b = xs[1].clone();
+
                     if let Expr::Universe = *a.0 {}
                     else { assert!(false); }
 
@@ -539,10 +553,40 @@ fn typechk_superposition_const(ctx: &InferCtx, c: &InferTypedConst, next_ii: &mu
     }
 }
 
+fn flatten_equal(xs: Vec<ExprL>, ys: &mut Vec<ExprL>) {
+    for x in xs {
+        if let Expr::Equal(zs) = (*x.0).clone() {
+            flatten_equal(zs.clone(), ys);
+        }
+        else {
+            ys.push(x);
+        }
+    }
+}
+
+pub(super) fn superposition_many<I : IntoIterator<Item=ExprL>>(xs: I, loc: Loc) -> ExprL {
+    let mut ys = vec![];
+    for x in xs {
+        if let Expr::Equal(zs) = (*x.0).clone() {
+            flatten_equal(zs.clone(), &mut ys);
+        }
+        else {
+            ys.push(x);
+        }
+    }
+    (Rc::new(Expr::Equal(ys)), loc)
+}
+
+pub(super) fn superposition_loc(a: ExprL, b: ExprL, loc: Loc) -> ExprL {
+    let mut ys = vec![];
+    flatten_equal(vec![a, b], &mut ys);
+    (Rc::new(Expr::Equal(ys)), loc)
+}
+
 // 重ね合わせ項を生成する関数
 fn superposition(origin: ExprL, inferred: ExprL) -> ExprL {
-    let loc_origin = origin.1.clone();
-    (Rc::new(Expr::Equal(origin, inferred)), loc_origin)
+    let loc = origin.1.clone();
+    superposition_loc(origin, inferred, loc)
 }
 
 /*  項`term`の種類によって推論された項と実際の項`type_`の重ね合わせを含んだ項木を生成する関数
@@ -609,14 +653,14 @@ fn typechk_superposition(ctx: &InferCtx, term: (Rc<Expr>, Loc), type_: (Rc<Expr>
             let new_A = typechk_superposition_typedterm(ctx, A, next_ii).unwrap_or(A.clone());
             let new_t = typechk_superposition_typedterm(&local_ctx, t, next_ii).unwrap_or(t.clone());
 
-            // 引数の型
-            let arg_type = new_A.tower[0].clone();
+            let arg_type = new_A.tower[0].clone(); // 引数の型
+            let arg_type2 = new_A.tower[1].clone(); // 引数の型の型
 
             // 戻り値の型
             let ret_type = new_t.tower[1].clone();
 
             let inferred_type = (Rc::new( Expr::Pi( InferAbs {
-                A: InferTypedTerm{tower: vec![arg_type, univ.clone()]},
+                A: InferTypedTerm{tower: vec![arg_type, superposition(arg_type2, univ.clone())]},
                 t: InferTypedTerm{tower: vec![ret_type, univ]},
             }, implicity ) ), None);
 
@@ -791,18 +835,18 @@ fn unify_equals(
     }
 
     match (*term.0).clone() {
-        Expr::Equal(a, b) => {
-            let a = unify_equals(a, None, next_inferterm_id, substs)?.0;
-            let b = unify_equals(b, None, next_inferterm_id, substs)?.0;
+        Expr::Equal(xs) => {
+            let xs = xs.into_iter().map(|x| Ok(unify_equals(x, None, next_inferterm_id, substs)?.0))
+                .collect::<Result<Vec<ExprL>, TypeChkErr>>()?;
 
             let (new_term, iparams) =
-                unify_supported_implicity(a.clone(), b, next_inferterm_id, substs, enable_implicit)?;
+                unify_combination(&xs, next_inferterm_id, substs, enable_implicit)?;
 
             let new_lower =
                 if iparams.is_empty() { lower }
                 else { Some(insert_implicit_args(lower.unwrap(), iparams, next_inferterm_id)) };
 
-            Ok(( new_term.unwrap_or(a), new_lower ))
+            Ok(( new_term.unwrap_or(xs[0].clone()), new_lower ))
         },
         Expr::App{s,t,implicity} => {
             let new_s = unify_equals_typed_wrap(s.clone(), next_inferterm_id, substs)?;
@@ -1040,8 +1084,8 @@ fn assign_abs(abs: HoledAbs, inferterm_id: &mut InferTermId) -> InferAbs {
     InferAbs{A: assign_term(abs.A, inferterm_id), t: assign_term(abs.t, inferterm_id)}
 }
 
-#[derive(Clone, Debug)]
-pub(super) enum Expr {
+#[derive(Clone, Debug, PartialEq)]
+pub enum Expr {
     Const(ConstId),
     DBI(usize),
     Universe,
@@ -1053,23 +1097,23 @@ pub(super) enum Expr {
     Value(Value),
     Infer{id: Rc<Cell<InferTermId>>},
     Subst(Subst, (Rc<Expr>, Loc)),
-    Equal((Rc<Expr>, Loc), (Rc<Expr>, Loc)),
+    Equal(Vec<(Rc<Expr>, Loc)>),
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct InferAbs {
     pub A: InferTypedTerm,
     pub t: InferTypedTerm,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct InferTypedConst {
     pub(super) c: InferConst,
     pub(super) type_: (Rc<Expr>, Loc),
     pub(super) loc: Loc,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub(super) enum InferConst {
     Def((Rc<Expr>, Loc)),
     DataType{param_types: Vec<((Rc<Expr>, Loc), u8)>, type_: (Rc<Expr>, Loc), ctors: Vec<ConstId>},
@@ -1078,7 +1122,7 @@ pub(super) enum InferConst {
 
 pub(super) type InferEnv = Vec<InferTypedConst>;
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct InferCtx {
     pub consts: InferEnv,
     pub local: Vec<InferTypedTerm>,
@@ -1090,7 +1134,7 @@ impl InferCtx {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct InferTypedTerm {
     pub(super) tower: Vec<(Rc<Expr>, Loc)>,
 }

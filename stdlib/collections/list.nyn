@@ -1,3 +1,4 @@
+(*
 data Option (a:Type) {
     none : Option a
     some : a -> Option a
@@ -33,3 +34,13 @@ map {a} {b} (f: a->b) (xs: List a) : List b =
         List.nil => lnil,
         List.cons y ys => lcons (f y) (map f ys)
     }
+*)
+
+id : {a:Type} -> a -> a
+id {a} x := x
+
+data Bool where
+    true : Bool
+    false : Bool
+
+t := id {Bool} Bool.true

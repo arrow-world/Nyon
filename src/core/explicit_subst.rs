@@ -3,8 +3,8 @@ use syntax::Loc;
 
 use std::rc::Rc;
 
-#[derive(Clone, Debug)]
-pub(super) enum Subst {
+#[derive(Clone, Debug, PartialEq)]
+pub enum Subst {
     Shift(usize),
     Dot((Rc<Expr>, Loc), Rc<Subst>),
 }
@@ -58,7 +58,7 @@ pub(super) fn subst(s: Subst, e: (Rc<Expr>, Loc)) -> (Rc<Expr>, Loc) {
             t: subst_typed(s, &u),
             implicity,
         } ), None),
-        (s, Expr::Equal(a,b)) => (Rc::new( Expr::Equal(subst(s.clone(), a), subst(s, b)) ), None),
+        (s, Expr::Equal(xs)) => superposition_many(xs.into_iter().map(|x| subst(s.clone(), x)), None),
         (s, Expr::Let{..}) => unimplemented!(),
         (s, Expr::Case{..}) => unimplemented!(),
         (s, Expr::Subst(t, e)) => subst(Subst::compose(s, t), e),

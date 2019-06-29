@@ -8,6 +8,7 @@ pub mod core;
 extern crate combine;
 extern crate num;
 extern crate unicode_categories;
+extern crate itertools;
 
 extern crate serde;
 #[macro_use] extern crate serde_derive;

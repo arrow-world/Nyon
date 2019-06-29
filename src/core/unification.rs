@@ -3,19 +3,45 @@ use super::explicit_subst::*;
 use syntax::Loc;
 
 use std::rc::Rc;
+use itertools::Itertools;
 
-pub(super) fn unify(
-    a: (Rc<Expr>, Loc),
-    b: (Rc<Expr>, Loc),
-    next_inferterm_id: &mut InferTermId,
+pub(super) fn unify_combination(
+    xs: &Vec<ExprL>,
+    next_ii: &mut InferTermId,
     substs: &mut Vec<Equal>,
+    enable_implicit: bool,
 )
-    -> Result<(), UnifyErr>
+    -> Result<(Option<(Rc<Expr>, Loc)>, Vec<((Rc<Expr>, Loc), u8)>), UnifyErr>
 {
-    let (new, iparams) = unify_supported_implicity(a, b, next_inferterm_id, substs, false)?;
-    assert!(new.is_none());
-    assert!(iparams.is_empty());
-    Ok(())
+    let mut new_term : Option<ExprL> = None;
+    let mut iparams = vec![];
+
+    for (a,b) in xs.iter().tuple_combinations() {
+        let (new_term_, iparams_) =
+            unify_supported_implicity(a.clone(), b.clone(), next_ii, substs, enable_implicit)?;
+        
+        if let Some(new_term_) = new_term_ {
+            if let Some(ref new_term) = new_term {
+                if new_term.0 != new_term_.0 {
+                    return Err(UnifyErr::ConflictedTerms(new_term.clone(), new_term_));
+                }
+            }
+            else {
+                new_term = Some(new_term_);
+            }
+        }
+        
+        if !iparams_.is_empty() {
+            if iparams.is_empty() {
+                iparams.extend(iparams_);
+            }
+            else if ! iparams.iter().zip(&iparams_).all(|(x,y)| x.0 == y.0) {
+                return Err(UnifyErr::ConflictedIParams(iparams, iparams_));
+            }
+        }
+    }
+
+    Ok((new_term, iparams))
 }
 
 /*
@@ -68,7 +94,7 @@ pub(super) fn unify_supported_implicity(
                 unify(e_a.clone(), e_b.clone(), ctx, substs)?;
             }, */
             // _ => substs.push( Equal::Defer(a.clone(), b.clone()) ),
-            _ => return Ok((Some((Rc::new(Expr::Equal(a.clone(), b.clone())), None)), vec![])),
+            _ => return Ok((Some(superposition_loc(a.clone(), b.clone(), None)), vec![])),
         },
         Expr::Infer{id: ref id_a} => match *b.0 {
             Expr::Infer{id: ref id_b} if id_a.get() == id_b.get() => (),
@@ -195,20 +221,6 @@ fn unify_typed(
     Ok((new_type, new_term_0.or(new_term_1), iparams_term))
 }
 
-fn unify_subst(s: Subst, t: Subst,
-    ctx: &InferCtx, next_inferterm_id: &mut InferTermId, equals: &mut Vec<Equal>) -> Result<(), UnifyErr>
-{
-    match (s, t) {
-        (Subst::Shift(m), Subst::Shift(n)) if m == n => (),
-        (Subst::Dot(e_a, s_a), Subst::Dot(e_b, s_b)) => {
-            unify_subst((*s_a).clone(), (*s_b).clone(), ctx, next_inferterm_id, equals)?;
-            unify(e_a, e_b, next_inferterm_id, equals)?;
-        },
-        _ => return Err(UnifyErr::SubstStructureMismatched),
-    }
-    Ok(())
-}
-
 /*
 pub(super) fn unify_arity(t: (Rc<Expr>, Loc), s: (Rc<Expr>, Loc), substs: &mut Vec<Equal>)
     -> Result<(), UnifyErr>
@@ -220,10 +232,12 @@ pub(super) fn unify_arity(t: (Rc<Expr>, Loc), s: (Rc<Expr>, Loc), substs: &mut V
 }
 */
 
-#[derive(Clone, PartialEq, Eq, Debug)]
+#[derive(Clone, PartialEq, Debug)]
 pub enum UnifyErr {
     TermStructureMismatched,
     SubstStructureMismatched,
     ValueMismatched(Value, Value),
     InApp(Box<UnifyErr>),
+    ConflictedTerms(ExprL, ExprL),
+    ConflictedIParams(Vec<(ExprL, u8)>, Vec<(ExprL, u8)>),
 }

@@ -153,7 +153,16 @@ impl fmt::Display for Expr {
                 Expr::Value(v) => write!(f, "{}", v),
                 Expr::Infer{id} => write!(f, "?{}", id.get()),
                 Expr::Subst(s,e) => write!(f, "[{}]{}", s, e.0),
-                Expr::Equal(a,b) => write!(f, "<{}={}>", a.0, b.0),
+                Expr::Equal(xs) => {
+                    write!(f, "< ")?;
+                    for i in 0..xs.len() {
+                        write!(f, "{}", xs[i].0)?;
+                        if i != xs.len()-1 {
+                            write!(f, " = ")?;
+                        }
+                    }
+                    write!(f, " >")
+                },
             }
         }
 
