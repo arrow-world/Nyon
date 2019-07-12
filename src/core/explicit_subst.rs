@@ -36,7 +36,7 @@ impl Subst {
 }
 
 pub(super) fn try_subst(e: &mut (Rc<Expr>, Loc)) {
-    debug!("try to substitute {} ...", e.0);
+    // debug!("try to substitute {} ...", e.0);
 
     if let Expr::Subst(ref s, ref f) = *(e.0).clone() {
         *e = subst((*s).clone(), f.clone());

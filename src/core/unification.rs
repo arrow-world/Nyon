@@ -22,12 +22,6 @@ pub(super) fn unify_combination(
         let (new_term_, iparams_) =
             unify_supported_implicity(a.clone(), b.clone(), next_ii, substs, enable_implicit)?;
         
-        if let Some(new_term_) = new_term_ {
-            if ! new_terms.contains(&new_term_) {
-                new_terms.push(new_term_);
-            }
-        }
-        
         if !iparams_.is_empty() {
             if iparams.is_empty() {
                 iparams.extend(iparams_);
@@ -36,16 +30,19 @@ pub(super) fn unify_combination(
                 return Err(UnifyErr::ConflictedIParams(iparams, iparams_));
             }
         }
+        
+        if let Some(new_term_) = new_term_ {
+            new_terms.push(new_term_);
+        }
+        else {
+            new_terms.push(a.clone());
+            new_terms.push(b.clone());
+        }
     }
 
     let new_term =
         if new_terms.is_empty() { None }
-        else {
-            Some(
-                if let Some(new_term) = new_terms.first().cloned() { new_term }
-                else { superposition_many(new_terms, None) }
-            )
-        };
+        else { Some(superposition_many(new_terms, None)) };
 
     Ok((new_term, iparams))
 }
@@ -194,7 +191,7 @@ pub(super) fn unify_supported_implicity(
                 else { return Err(UnifyErr::ValueMismatched(v_a.clone(), v_b.clone())) },
             _ => return Err(UnifyErr::TermStructureMismatched),
         },
-        Expr::Equal(..) => (),
+        Expr::Equal(ref xs) => return unify_combination(xs, next_inferterm_id, substs, enable_implicit),
     };
 
     Ok((None, vec![]))

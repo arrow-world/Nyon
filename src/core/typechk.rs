@@ -185,13 +185,14 @@ pub fn typechk(env: HoledEnv) -> Result<Env, TypeChkErr> {
             debug!("substitution result:");
             debug!("found_infer?: {}", subst_result.found_infer);
             debug!("has_substed?: {}", subst_result.has_substed);
+            debug!("found_equal?: {}", subst_result.found_equal);
 
             debug!("current ctx: {}\n", ctx);
 
             if !subst_result.found_infer {
                 break 'typechk;
             }
-            if !subst_result.has_substed {
+            if !subst_result.has_substed && !subst_result.found_equal {
                 break;
             }
         }
@@ -250,7 +251,7 @@ fn subst_infers(
 {
     assert!(ctx.local.is_empty());
 
-    let mut result = SubstResult{has_substed: false, found_infer: false};
+    let mut result = SubstResult{has_substed: false, found_infer: false, found_equal: false};
 
     subst_infers_ctx(ctx, substs_map, &mut result);
 
@@ -325,10 +326,12 @@ fn subst_infers(
                     subst_infers_subst(s, substs, result);
                     subst_infers_term(e, substs, result);
                 },
-                Expr::Equal(ref mut xs) =>
+                Expr::Equal(ref mut xs) => {
+                    result.found_equal = true;
                     for x in xs {
                         subst_infers_term(x, substs, result);
-                    },
+                    }
+                },
                 _ => (),
             }
         }
@@ -356,6 +359,7 @@ fn subst_infers(
 pub struct SubstResult {
     has_substed: bool,
     found_infer: bool,
+    found_equal: bool,
 }
 
 fn cast_no_infer(ctx: InferCtx) -> Env {
@@ -485,20 +489,9 @@ fn typechk_superposition_const(ctx: &InferCtx, c: &InferTypedConst, next_ii: &mu
                 let (new_type1, new_type2) = typechk_superposition(ctx, param_type.clone(), univ1.clone(), next_ii);
 
                 // GADTのパラメタ型の型は変更不可
-                // `new_type2`は変更があったとしても`Some(<Type1=Type1>)`でなければならない
+                // `new_type2`は変更があったとしても`Type1`でなければならない
                 if let Some(new_type2) = new_type2 {
-                    if let Expr::Equal(ref xs) = *new_type2.0 {
-                        assert!(xs.len() == 2);
-                        let a = xs[0].clone();
-                        let b = xs[1].clone();
-
-                        if let Expr::Universe = *a.0 {}
-                        else { assert!(false); }
-
-                        if let Expr::Universe = *b.0 {}
-                        else { assert!(false); }
-                    }
-                    else { assert!(false); }
+                    assert_eq!(new_type2.0, univ1.0);
                 }
 
                 if let Some(new_type1) = new_type1 {
@@ -528,26 +521,12 @@ fn typechk_superposition_const(ctx: &InferCtx, c: &InferTypedConst, next_ii: &mu
             let univ1 = (Rc::new(Expr::Universe), None);
 
             // コンストラクタの型`c.type_`は1階の型である
-            let (new_type1, new_type2) = typechk_superposition(ctx, c.type_.clone(), univ1, next_ii);
+            let (new_type1, new_type2) = typechk_superposition(ctx, c.type_.clone(), univ1.clone(), next_ii);
 
             // コンストラクタの型の型は変更不可
-            // `new_type2`は変更があったとしても`<Type1=Type1>`でなければならない
+            // `new_type2`は変更があったとしても`Type1`でなければならない
             if let Some(new_type2) = new_type2 {
-                if let Expr::Equal(ref xs) = *new_type2.0 {
-                    assert!(xs.len() == 2);
-                    let a = xs[0].clone();
-                    let b = xs[1].clone();
-
-                    if let Expr::Universe = *a.0 {}
-                    else { assert!(false); }
-
-                    if let Expr::Universe = *b.0 {}
-                    else {
-                        debug!("{}", b.0);
-                        assert!(false);
-                    }
-                }
-                else { assert!(false); }
+                assert_eq!(new_type2.0, univ1.0);
             }
 
             // コンストラクタの型が変更されればSomeで返して変更を伝播
@@ -561,7 +540,7 @@ fn flatten_equal(xs: Vec<ExprL>, ys: &mut Vec<ExprL>) {
         if let Expr::Equal(zs) = (*x.0).clone() {
             flatten_equal(zs.clone(), ys);
         }
-        else {
+        else if !ys.iter().any(|y| x.0 == y.0) {
             ys.push(x);
         }
     }
@@ -573,17 +552,21 @@ pub(super) fn superposition_many<I : IntoIterator<Item=ExprL>>(xs: I, loc: Loc) 
         if let Expr::Equal(zs) = (*x.0).clone() {
             flatten_equal(zs.clone(), &mut ys);
         }
-        else {
+        else if !ys.iter().any(|y| x.0 == y.0) {
             ys.push(x);
         }
     }
-    (Rc::new(Expr::Equal(ys)), loc)
+
+    if ys.len() == 1 {
+        (ys[0].0.clone(), loc)
+    }
+    else {
+        (Rc::new(Expr::Equal(ys)), loc)
+    }
 }
 
 pub(super) fn superposition_loc(a: ExprL, b: ExprL, loc: Loc) -> ExprL {
-    let mut ys = vec![];
-    flatten_equal(vec![a, b], &mut ys);
-    (Rc::new(Expr::Equal(ys)), loc)
+    superposition_many(vec![a, b], loc)
 }
 
 // 重ね合わせ項を生成する関数
